@@ -4,3 +4,4 @@ sounddevice>=0.5
 numpy>=2.0
 scipy>=1.13
 pyserial>=3.5
+evdev>=1.7  # only used by --fake (touchpad input); requires the user to be in the 'input' group on Linux
