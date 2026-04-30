@@ -1,6 +1,6 @@
-# hebel
+# theremin of winds
 
-*Hebel* (הֶבֶל) is the Hebrew word for breath, vapor, the fleeting exhale.
+A baton for conducting the air, played without touching it.
 
 Real-time wind synthesizer driven by an [OpenTheremin V4](https://www.gaudi.ch/OpenTheremin/). Wave your hands near the antennas: pitch hand sweeps the wind from low rumble to high whistle, volume hand goes from breeze to storm. No samples, no recordings. The sound is built from scratch and shaped by your gestures.
 
