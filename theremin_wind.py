@@ -58,6 +58,13 @@ Q_DRIFT_TAU_S = 2.0        # ~2 s correlation time
 # >8 = aggressive overdrive ("horror" tone).
 DRIVE = 1.2
 
+# High-band gain (multiplier on the tilt^3 mix coef). 0 = no top-end "sizzle".
+HIGH_BAND_GAIN = 0.45
+
+# Mid-band Q amp ramp. mid_Q = 1.2 + MID_Q_MAX * amp^0.6, so larger -> louder
+# play means narrower (more whistly) mid band. 0 disables the ramp entirely.
+MID_Q_MAX = 4.0
+
 # Paul Kellet's refined pink noise filter (6 parallel one-poles + white passthrough).
 # Sounds smoother than Voss-McCartney; cheap when run via lfilter per pole.
 PINK_POLES = [0.99886, 0.99332, 0.96900, 0.86650, 0.55000, -0.7616]
@@ -82,6 +89,8 @@ class State:
         # feature toggles (TUI-editable)
         self.use_3band = True
         self.use_gust = True
+        self.use_fifth = False
+        self.third_mode = 0  # 0=off, 1=minor (6:5), 2=major (5:4)
         # knobs (TUI-editable)
         self.low_fc = LOW_FC
         self.low_q = LOW_Q
@@ -94,6 +103,32 @@ class State:
         self.q_drift_depth = Q_DRIFT_DEPTH
         self.q_drift_tau_s = Q_DRIFT_TAU_S
         self.drive = DRIVE
+        self.high_band_gain = HIGH_BAND_GAIN
+        self.mid_q_max = MID_Q_MAX
+        self.tone_level = 0.0  # bourdon voice (pitched-wind intervals) added on top of wind
+        self.bourdon_q = 12.0  # higher = narrower whistle, more pitched; lower = airier
+        # spatial mode: pitch antenna keeps its normal pitch role; volume antenna (CC)
+        # drives stereo pan position. Amplitude stays at the note-on velocity level.
+        self.spatial_mode = False
+        self.target_position = 0.5  # 0..1, 0 = full left, 1 = full right
+        self.cur_position = 0.5
+        self.pan_floor = 0.15  # minimum gain on the "off" side; 0 = hard pan, 0.5 = barely panned
+        # macros (preset sliders): when adjusted, write through to fine knobs above.
+        # Defaults of 1.0 reproduce the historical "stormy" sound.
+        self.brightness = 1.0
+        self.whistle = 1.0
+
+    def apply_brightness(self):
+        # 0 = dark/calm, 1 = bright/stormy. Maps to high_band_gain and drive.
+        b = self.brightness
+        self.high_band_gain = HIGH_BAND_GAIN * b
+        self.drive = 0.5 + (DRIVE - 0.5) * b
+
+    def apply_whistle(self):
+        # 0 = no resonance/howl, 1 = full whistle ramp. Maps to high_q and mid_q_max.
+        w = self.whistle
+        self.high_q = 1.0 + (HIGH_Q - 1.0) * w
+        self.mid_q_max = MID_Q_MAX * w
 
     def _recompute_freq(self):
         if self.note is None:
@@ -121,14 +156,23 @@ class State:
     def cc(self, num: int, val: int):
         self.last_cc = (num, val)
         if num in (1, 7, 11, 74):
-            self.target_amp = (val / 127.0) ** 1.8
+            if self.spatial_mode:
+                # left hand = pan; amp stays at its note-on value.
+                self.target_position = val / 127.0
+            else:
+                self.target_amp = (val / 127.0) ** 1.8
 
     def fake_xy(self, x_norm: float, y_norm: float):
-        """Trackpad fake-input: x ∈ [0,1] → freq (log), y ∈ [0,1] → amp."""
+        """Trackpad fake-input: x ∈ [0,1] → freq (log). Y is amp normally;
+        in spatial mode Y → pan position and amp is held constant while touching."""
         x_norm = max(0.0, min(1.0, x_norm))
         y_norm = max(0.0, min(1.0, y_norm))
         self.target_freq = FREQ_LO * (FREQ_HI / FREQ_LO) ** x_norm
-        self.target_amp = y_norm ** 1.8
+        if self.spatial_mode:
+            self.target_position = y_norm
+            self.target_amp = 0.7
+        else:
+            self.target_amp = y_norm ** 1.8
 
 
 # ---- MIDI-over-serial parser ---------------------------------------------
@@ -295,6 +339,20 @@ def serial_loop(state: State, port: str, baud: int, debug: bool):
 
 # ---- audio synth ---------------------------------------------------------
 
+def pan_gains(position: float, n_channels: int, floor: float = 0.0) -> tuple[float, ...]:
+    """Per-channel gains for a mono source panned to `position` ∈ [0, 1].
+
+    Stereo: equal-power L/R pan (cos/sin), then clamped from below by `floor`
+    so neither earbud ever goes silent at extreme pan. Surround layouts
+    (quad / 5.1) would extend this with VBAP over a speaker-angle table.
+    """
+    p = max(0.0, min(1.0, position))
+    if n_channels == 2:
+        return (max(floor, math.cos(p * math.pi / 2.0)),
+                max(floor, math.sin(p * math.pi / 2.0)))
+    return tuple(1.0 / math.sqrt(n_channels) for _ in range(n_channels))
+
+
 def build_biquad_bandpass(fc: float, Q: float, sr: int):
     """RBJ bandpass (constant skirt, peak gain = Q)."""
     w0 = 2.0 * math.pi * fc / sr
@@ -328,6 +386,12 @@ def make_audio_callback(state: State):
     gust_state = 0.0
     q_drift_state = 0.0
 
+    # --- bourdon voices: narrow bandpass on the same pink noise. zi persists across blocks
+    # so coef changes (player moves the theremin) don't click. ---
+    bourd_root_zi = np.zeros(2)
+    bourd_fifth_zi = np.zeros(2)
+    bourd_third_zi = np.zeros(2)
+
     # control smoothing
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
     alpha_smooth = 1.0 - math.exp(-1.0 / max(tau_blocks, 1.0))
@@ -336,6 +400,7 @@ def make_audio_callback(state: State):
 
     def callback(outdata, frames, time_info, status):
         nonlocal rumble_zi, bp_zi, low_zi, mid_zi, high_zi, gust_state, q_drift_state
+        nonlocal bourd_root_zi, bourd_fifth_zi, bourd_third_zi
         if status:
             print(f"[audio] {status}", file=sys.stderr)
 
@@ -343,15 +408,25 @@ def make_audio_callback(state: State):
             tf, ta = state.target_freq, state.target_amp
             use_3band = state.use_3band
             use_gust = state.use_gust
+            use_fifth = state.use_fifth
+            third_mode = state.third_mode
+            tone_level = state.tone_level
+            bourdon_q = state.bourdon_q
+            spatial_mode = state.spatial_mode
+            tp = state.target_position
+            pan_floor = state.pan_floor
             low_fc, low_q = state.low_fc, state.low_q
             high_fc, high_q = state.high_fc, state.high_q
             mid_fc_lo, mid_fc_hi = state.mid_fc_lo, state.mid_fc_hi
             gust_depth, gust_tau_s = state.gust_depth, state.gust_tau_s
             q_drift_depth, q_drift_tau_s = state.q_drift_depth, state.q_drift_tau_s
             drive = state.drive
+            high_band_gain = state.high_band_gain
+            mid_q_max = state.mid_q_max
 
         state.cur_freq += (tf - state.cur_freq) * alpha_smooth
         state.cur_amp += (ta - state.cur_amp) * alpha_smooth
+        state.cur_position += (tp - state.cur_position) * alpha_smooth
         f = max(60.0, min(SR * 0.45, state.cur_freq))
         amp = max(0.0, min(1.0, state.cur_amp))
 
@@ -390,7 +465,7 @@ def make_audio_callback(state: State):
             tilt = max(0.0, min(1.0, tilt))
 
             mid_fc = mid_fc_lo * (mid_fc_hi / mid_fc_lo) ** tilt
-            mid_Q = (1.2 + 4.0 * (amp ** 0.6)) * q_mod
+            mid_Q = (1.2 + mid_q_max * (amp ** 0.6)) * q_mod
 
             # rebuild biquads each block — cheap and lets knobs change live
             low_b, low_a = build_biquad_bandpass(low_fc, low_q, SR)
@@ -403,18 +478,56 @@ def make_audio_callback(state: State):
 
             g_low = (1.0 - tilt) * 0.6 + 0.3
             g_mid = 0.7
-            g_high = (tilt ** 3) * 0.45
+            g_high = (tilt ** 3) * high_band_gain
 
             mix = (low * g_low * 4.0 + mid * g_mid * 1.5 + high * g_high * 1.5) * amp_eff
         else:
-            Q = (1.2 + 5.0 * (amp ** 0.6)) * q_mod
+            Q = (1.2 + (mid_q_max + 1.0) * (amp ** 0.6)) * q_mod
             b, a = build_biquad_bandpass(f, Q, SR)
             bp, bp_zi = lfilter(b, a, src, zi=bp_zi)
             rumble, rumble_zi = lfilter(rumble_b, rumble_a, src, zi=rumble_zi)
             mix = (bp * 1.5 * 0.75 + rumble * 4.0 * 0.55) * amp_eff
 
+        # --- bourdon: narrow bandpass on the same pink noise at root + optional 5th/3rd.
+        # Pitched-wind whistle (like air across a bottle), not a sine pad. Tracks the theremin
+        # in parallel — the singer-and-shadowing-monk effect of medieval organum. ---
+        if tone_level > 0.0:
+            br_b, br_a = build_biquad_bandpass(f, bourdon_q, SR)
+            voices, bourd_root_zi = lfilter(br_b, br_a, src, zi=bourd_root_zi)
+            n_voices = 1
+
+            if use_fifth:
+                f5 = f * 1.5
+                if f5 < SR * 0.45:
+                    bf_b, bf_a = build_biquad_bandpass(f5, bourdon_q, SR)
+                    fifth, bourd_fifth_zi = lfilter(bf_b, bf_a, src, zi=bourd_fifth_zi)
+                    voices = voices + fifth
+                    n_voices += 1
+
+            if third_mode > 0:
+                ratio = 1.2 if third_mode == 1 else 1.25  # 6:5 minor, 5:4 major
+                f3 = f * ratio
+                if f3 < SR * 0.45:
+                    bt_b, bt_a = build_biquad_bandpass(f3, bourdon_q, SR)
+                    third, bourd_third_zi = lfilter(bt_b, bt_a, src, zi=bourd_third_zi)
+                    voices = voices + third
+                    n_voices += 1
+
+            # high-Q bandpass on noise has low RMS; boost so the whistle sits with the wind.
+            mix = mix + (voices / n_voices) * amp_eff * tone_level * 4.0
+
         mix = np.tanh(mix * drive)
-        outdata[:, 0] = mix.astype(np.float32)
+
+        n_ch = outdata.shape[1]
+        if spatial_mode and n_ch >= 2:
+            gains = pan_gains(state.cur_position, n_ch, pan_floor)
+            mix32 = mix.astype(np.float32)
+            for c in range(n_ch):
+                outdata[:, c] = mix32 * gains[c]
+        else:
+            mix32 = mix.astype(np.float32)
+            for c in range(n_ch):
+                outdata[:, c] = mix32
 
         # expose for TUI display
         state.cur_tilt = (math.log(max(60.0, f)) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
@@ -424,20 +537,33 @@ def make_audio_callback(state: State):
 
 # ---- TUI -----------------------------------------------------------------
 
-# (label, attr, min, max, step, fmt)
-KNOB_DEFS = [
+# (label, attr, min, max, step, fmt). Macro knobs at the top write through to fine
+# knobs below (see State.apply_brightness / apply_whistle).
+MACROS = [
+    ("» brightness ", "brightness",   0.0,   1.0,   0.05, "{:>6.2f}   "),
+    ("» whistle    ", "whistle",      0.0,   1.0,   0.05, "{:>6.2f}   "),
+]
+KNOB_DEFS = MACROS + [
     ("low band  Fc", "low_fc",     20.0,  500.0,  10.0,  "{:>6.0f} Hz"),
     ("low band   Q", "low_q",       0.3,    5.0,   0.1,  "{:>6.2f}   "),
     ("high band Fc", "high_fc",  1000.0, 8000.0, 100.0,  "{:>6.0f} Hz"),
     ("high band  Q", "high_q",      1.0,   20.0,   0.5,  "{:>6.2f}   "),
+    ("high band  G", "high_band_gain",0.0,  1.0,   0.05, "{:>6.2f}   "),
     ("mid Fc lo   ", "mid_fc_lo", 100.0,  800.0,  25.0,  "{:>6.0f} Hz"),
     ("mid Fc hi   ", "mid_fc_hi", 800.0, 5000.0, 100.0,  "{:>6.0f} Hz"),
+    ("mid Q max   ", "mid_q_max",   0.0,   8.0,   0.25, "{:>6.2f}   "),
     ("gust depth  ", "gust_depth",   0.0,   1.0,   0.05, "{:>6.2f}   "),
     ("gust tau    ", "gust_tau_s",   0.2,   8.0,   0.2,  "{:>6.1f} s "),
     ("Q drift     ", "q_drift_depth",0.0,   0.5,   0.02, "{:>6.2f}   "),
     ("Q drift tau ", "q_drift_tau_s",0.5,   8.0,   0.5,  "{:>6.1f} s "),
     ("drive       ", "drive",        0.5,  10.0,   0.2,  "{:>6.2f}   "),
+    ("tone level  ", "tone_level",   0.0,   1.0,   0.05, "{:>6.2f}   "),
+    ("bourdon Q   ", "bourdon_q",    2.0,  30.0,   1.0,  "{:>6.1f}   "),
+    ("pan floor   ", "pan_floor",    0.0,   0.5,   0.02, "{:>6.2f}   "),
 ]
+MACRO_ATTRS = {a for _, a, *_ in MACROS}
+
+THIRD_LABELS = {0: "off", 1: "min", 2: "maj"}
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
@@ -455,6 +581,9 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         stdscr.erase()
         with state.lock:
             u3, ug = state.use_3band, state.use_gust
+            u5, tm = state.use_fifth, state.third_mode
+            usp = state.spatial_mode
+            cp = state.cur_position
             knob_vals = [getattr(state, a) for _, a, *_ in KNOB_DEFS]
             note = state.note
             bend = state.pitch_bend
@@ -472,29 +601,33 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
 
             stdscr.addstr(3, 0, "features:  ")
             stdscr.addstr(f"[{'x' if u3 else ' '}] 3-band (3)   ")
-            stdscr.addstr(f"[{'x' if ug else ' '}] gust (g)")
+            stdscr.addstr(f"[{'x' if ug else ' '}] gust (g)   ")
+            stdscr.addstr(f"[{'x' if u5 else ' '}] fifth (5)   ")
+            stdscr.addstr(f"third: {THIRD_LABELS[tm]} (t)   ")
+            stdscr.addstr(f"[{'x' if usp else ' '}] spatial (s)")
 
-            stdscr.addstr(5, 0, "knobs:")
-            for i, ((lab, _, _, _, _, fmt), v) in enumerate(zip(KNOB_DEFS, knob_vals)):
+            stdscr.addstr(5, 0, "knobs:  (» = macro: writes through to fine knobs below)")
+            for i, ((lab, attr, _, _, _, fmt), v) in enumerate(zip(KNOB_DEFS, knob_vals)):
                 marker = "▶" if i == sel else " "
                 line = f" {marker} {lab}  {fmt.format(v)}"
+                attrs = curses.A_BOLD if attr in MACRO_ATTRS else 0
                 if i == sel:
-                    stdscr.addstr(6 + i, 0, line, curses.A_REVERSE)
-                else:
-                    stdscr.addstr(6 + i, 0, line)
+                    attrs |= curses.A_REVERSE
+                stdscr.addstr(6 + i, 0, line, attrs)
 
             row = 6 + len(KNOB_DEFS) + 1
             stdscr.addstr(row, 0, "live:")
             stdscr.addstr(row + 1, 2,
                           f"note={str(note) if note is not None else '--':>3}  "
                           f"bend={bend:>+6}  freq={cf:>6.1f} Hz")
+            spatial_str = f"  pos={cp:.2f}" if usp else ""
             stdscr.addstr(row + 2, 2,
-                          f"amp={ca:.2f}  tilt={tilt:.2f}  "
+                          f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  "
                           f"last_cc={cc[0]}={cc[1]}" if cc else
-                          f"amp={ca:.2f}  tilt={tilt:.2f}  last_cc=--")
+                          f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  last_cc=--")
 
             stdscr.addstr(row + 4, 0,
-                          "↑↓ select knob   ←→ adjust   3/g toggle   q quit")
+                          "↑↓ select knob   ←→ adjust   3/g/5/t/s toggle   q quit")
         except curses.error:
             pass  # window too small; skip this frame
         stdscr.refresh()
@@ -513,16 +646,26 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                 state.use_3band = not state.use_3band
             elif key == ord("g"):
                 state.use_gust = not state.use_gust
+            elif key == ord("5"):
+                state.use_fifth = not state.use_fifth
+            elif key == ord("t"):
+                state.third_mode = (state.third_mode + 1) % 3
+            elif key == ord("s"):
+                state.spatial_mode = not state.spatial_mode
+                # re-derive freq/position from current MIDI state under the new mode
+                state._recompute_freq()
             elif key in (curses.KEY_UP, ord("k")):
                 sel = (sel - 1) % len(KNOB_DEFS)
             elif key in (curses.KEY_DOWN, ord("j")):
                 sel = (sel + 1) % len(KNOB_DEFS)
-            elif key in (curses.KEY_LEFT, ord("h")):
+            elif key in (curses.KEY_LEFT, ord("h"), curses.KEY_RIGHT, ord("l")):
                 _, attr, lo, hi, step, _ = KNOB_DEFS[sel]
-                setattr(state, attr, _clamp(getattr(state, attr) - step, lo, hi))
-            elif key in (curses.KEY_RIGHT, ord("l")):
-                _, attr, lo, hi, step, _ = KNOB_DEFS[sel]
-                setattr(state, attr, _clamp(getattr(state, attr) + step, lo, hi))
+                delta = -step if key in (curses.KEY_LEFT, ord("h")) else step
+                setattr(state, attr, _clamp(getattr(state, attr) + delta, lo, hi))
+                if attr == "brightness":
+                    state.apply_brightness()
+                elif attr == "whistle":
+                    state.apply_whistle()
 
 
 # ---- entry point ---------------------------------------------------------
@@ -554,6 +697,9 @@ def main():
                     help="start with single-bandpass synth (toggle live with '3')")
     ap.add_argument("--no-gust", action="store_true",
                     help="start with gust LFO off (toggle live with 'g')")
+    ap.add_argument("--spatial", action="store_true",
+                    help="start in spatial mode: pitch antenna pans the wind L↔R "
+                         "(toggle live with 's'); wind pitch becomes a fixed knob")
     ap.add_argument("--fake", action="store_true",
                     help="trackpad fake mode (no theremin needed): touchpad X = freq, Y = volume")
     ap.add_argument("--trackpad-dev",
@@ -603,6 +749,7 @@ def main():
     state = State()
     state.use_3band = not args.no_3band
     state.use_gust = not args.no_gust
+    state.spatial_mode = args.spatial
 
     cb = make_audio_callback(state)
 
@@ -619,7 +766,7 @@ def main():
     use_tui = not (args.no_tui or args.debug)
 
     with sd.OutputStream(
-        samplerate=SR, blocksize=BLOCK, channels=1,
+        samplerate=SR, blocksize=BLOCK, channels=2,
         dtype="float32", callback=cb, latency="low",
     ):
         if use_tui:
