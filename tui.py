@@ -1,7 +1,7 @@
 """Curses TUI: live knob editing and feature toggles.
 
 Redraws at 10 Hz. Mutates State under State.lock. Macro knobs at the top
-write through to fine knobs below (see State.apply_brightness / apply_whistle).
+write through to fine knobs below via property setters on State.
 """
 from typing import NamedTuple
 
@@ -139,8 +139,6 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             elif key in (curses.KEY_LEFT, ord("h"), curses.KEY_RIGHT, ord("l")):
                 k = KNOB_DEFS[sel]
                 delta = -k.step if key in (curses.KEY_LEFT, ord("h")) else k.step
+                # macro attrs (brightness, whistle) are properties that fan out
+                # to fine knobs via their setter — no explicit apply_X needed.
                 setattr(state, k.attr, _clamp(getattr(state, k.attr) + delta, k.lo, k.hi))
-                if k.attr == "brightness":
-                    state.apply_brightness()
-                elif k.attr == "whistle":
-                    state.apply_whistle()

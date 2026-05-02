@@ -51,24 +51,35 @@ class State:
         self.target_position = 0.5  # 0..1, 0 = full left, 1 = full right
         self.cur_position = 0.5
         self.pan_floor = 0.15  # minimum gain on the "off" side; 0 = hard pan, 0.5 = barely panned
-        # macros (preset sliders): when adjusted, write through to fine knobs above.
-        # Defaults of 1.0 reproduce the historical "stormy" sound.
-        self.brightness = 1.0
-        self.whistle = 1.0
+        # macros: setting these writes through to the fine knobs above.
+        # Defaults of 1.0 reproduce the historical "stormy" sound; 1.0 maps to the
+        # same fine-knob values just assigned, so direct-set bypasses the setter.
+        self._brightness = 1.0
+        self._whistle = 1.0
         # exposed for the TUI; written by the audio callback each block.
         self.cur_tilt = 0.0
 
-    def apply_brightness(self):
-        # 0 = dark/calm, 1 = bright/stormy. Maps to high_band_gain and drive.
-        b = self.brightness
-        self.high_band_gain = HIGH_BAND_GAIN * b
-        self.drive = 0.5 + (DRIVE - 0.5) * b
+    @property
+    def brightness(self) -> float:
+        return self._brightness
 
-    def apply_whistle(self):
+    @brightness.setter
+    def brightness(self, v: float):
+        # 0 = dark/calm, 1 = bright/stormy. Maps to high_band_gain and drive.
+        self._brightness = v
+        self.high_band_gain = HIGH_BAND_GAIN * v
+        self.drive = 0.5 + (DRIVE - 0.5) * v
+
+    @property
+    def whistle(self) -> float:
+        return self._whistle
+
+    @whistle.setter
+    def whistle(self, v: float):
         # 0 = no resonance/howl, 1 = full whistle ramp. Maps to high_q and mid_q_max.
-        w = self.whistle
-        self.high_q = 1.0 + (HIGH_Q - 1.0) * w
-        self.mid_q_max = MID_Q_MAX * w
+        self._whistle = v
+        self.high_q = 1.0 + (HIGH_Q - 1.0) * v
+        self.mid_q_max = MID_Q_MAX * v
 
     def _recompute_freq(self):
         if self.note is None:
