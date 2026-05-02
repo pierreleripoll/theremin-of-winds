@@ -181,28 +181,25 @@ def make_audio_callback(state: State):
             rumble, rumble_zi = lfilter(rumble_b, rumble_a, src, zi=rumble_zi)
             mix = (bp * 1.5 * 0.75 + rumble * 4.0 * 0.55) * amp_eff
 
-        # --- bourdon: narrow bandpass on the same pink noise at root + optional 5th/3rd.
-        # Pitched-wind whistle (like air across a bottle), not a sine pad. Tracks the theremin
-        # in parallel — the singer-and-shadowing-monk effect of medieval organum. ---
+        # Bourdon: narrow bandpass on the same pink noise at root + optional 5th/3rd.
+        # Pitched-wind whistle (like air across a bottle), not a sine pad. Tracks the
+        # theremin in parallel — the singer-and-shadowing-monk effect of medieval organum.
         if tone_level > 0.0:
-            br_b, br_a = build_biquad_bandpass(f, bourdon_q, SR)
-            voices, bourd_root_zi = lfilter(br_b, br_a, src, zi=bourd_root_zi)
+            def voice(freq: float, zi):
+                b, a = build_biquad_bandpass(freq, bourdon_q, SR)
+                return lfilter(b, a, src, zi=zi)
+
+            # f is pre-clamped to <= SR * 0.45; root is always safe to filter.
+            voices, bourd_root_zi = voice(f, bourd_root_zi)
             n_voices = 1
-
-            if use_fifth:
-                f5 = f * 1.5
-                if f5 < SR * 0.45:
-                    bf_b, bf_a = build_biquad_bandpass(f5, bourdon_q, SR)
-                    fifth, bourd_fifth_zi = lfilter(bf_b, bf_a, src, zi=bourd_fifth_zi)
-                    voices = voices + fifth
-                    n_voices += 1
-
+            if use_fifth and f * 1.5 < SR * 0.45:
+                fifth, bourd_fifth_zi = voice(f * 1.5, bourd_fifth_zi)
+                voices = voices + fifth
+                n_voices += 1
             if third_mode > 0:
                 ratio = 1.2 if third_mode == 1 else 1.25  # 6:5 minor, 5:4 major
-                f3 = f * ratio
-                if f3 < SR * 0.45:
-                    bt_b, bt_a = build_biquad_bandpass(f3, bourdon_q, SR)
-                    third, bourd_third_zi = lfilter(bt_b, bt_a, src, zi=bourd_third_zi)
+                if f * ratio < SR * 0.45:
+                    third, bourd_third_zi = voice(f * ratio, bourd_third_zi)
                     voices = voices + third
                     n_voices += 1
 
