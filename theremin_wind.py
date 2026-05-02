@@ -21,7 +21,6 @@ Usage:
   python theremin_wind.py --debug                 # print every MIDI msg
 """
 import argparse
-import glob
 import sys
 import threading
 import time
@@ -30,7 +29,7 @@ import sounddevice as sd
 
 from audio import make_audio_callback
 from config import BAUD, BLOCK, SR
-from midi import find_serial_port, serial_loop
+from midi import find_serial_port, list_serial_ports, serial_loop
 from state import State
 
 
@@ -63,7 +62,7 @@ def main():
 
     if args.list:
         print("Serial ports:")
-        for p in sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")):
+        for p in list_serial_ports():
             print(f"  {p}")
         print("\nAudio outputs:")
         for i, d in enumerate(sd.query_devices()):

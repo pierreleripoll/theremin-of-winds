@@ -100,10 +100,18 @@ def serial_loop(state: State, port: str, baud: int, debug: bool):
             time.sleep(2.0)
 
 
+SERIAL_GLOBS = ("/dev/ttyACM*", "/dev/ttyUSB*")
+
+
+def list_serial_ports() -> list[str]:
+    """Sorted list of candidate serial ports (USB CDC + USB-serial chips)."""
+    return sorted(p for pattern in SERIAL_GLOBS for p in glob.glob(pattern))
+
+
 def find_serial_port(requested: str | None) -> str:
     if requested:
         return requested
-    candidates = sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"))
+    candidates = list_serial_ports()
     if not candidates:
         raise RuntimeError(
             "no /dev/ttyACM* or /dev/ttyUSB* found — is the OpenTheremin plugged in?"
