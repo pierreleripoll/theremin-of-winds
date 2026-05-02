@@ -100,10 +100,9 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                           f"note={str(note) if note is not None else '--':>3}  "
                           f"bend={bend:>+6}  freq={cf:>6.1f} Hz")
             spatial_str = f"  pos={cp:.2f}" if usp else ""
+            cc_str = f"last_cc={cc[0]}={cc[1]}" if cc else "last_cc=--"
             stdscr.addstr(row + 2, 2,
-                          f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  "
-                          f"last_cc={cc[0]}={cc[1]}" if cc else
-                          f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  last_cc=--")
+                          f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  {cc_str}")
 
             stdscr.addstr(row + 4, 0,
                           "↑↓ select knob   ←→ adjust   3/g/5/t/s toggle   q quit")
