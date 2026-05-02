@@ -131,7 +131,7 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             elif key == ord("s"):
                 state.spatial_mode = not state.spatial_mode
                 # re-derive freq/position from current MIDI state under the new mode
-                state._recompute_freq()
+                state.recompute_freq()
             elif key in (curses.KEY_UP, ord("k")):
                 sel = (sel - 1) % len(KNOB_DEFS)
             elif key in (curses.KEY_DOWN, ord("j")):

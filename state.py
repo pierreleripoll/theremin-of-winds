@@ -81,7 +81,7 @@ class State:
         self.high_q = 1.0 + (HIGH_Q - 1.0) * v
         self.mid_q_max = MID_Q_MAX * v
 
-    def _recompute_freq(self):
+    def recompute_freq(self):
         if self.note is None:
             return
         bend_semis = self.pitch_bend / 8192.0 * 2.0  # default ±2 semitones
@@ -91,7 +91,7 @@ class State:
 
     def note_on(self, note: int, vel: int):
         self.note = note
-        self._recompute_freq()
+        self.recompute_freq()
         if self.target_amp == 0.0:
             self.target_amp = (vel / 127.0) ** 1.8
 
@@ -102,7 +102,7 @@ class State:
 
     def pitch_wheel(self, lsb: int, msb: int):
         self.pitch_bend = ((msb << 7) | lsb) - 8192
-        self._recompute_freq()
+        self.recompute_freq()
 
     def cc(self, num: int, val: int):
         self.last_cc = (num, val)
