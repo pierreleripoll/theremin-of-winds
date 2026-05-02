@@ -59,32 +59,24 @@ def build_biquad_bandpass(fc: float, Q: float, sr: int):
 def make_audio_callback(state: State):
     """Audio callback. Reads feature flags + knobs from State each block, so a
     TUI thread can mutate them live."""
-    # --- filters whose coefs are static (legacy single-band rumble) ---
     rumble_b, rumble_a = iirfilter(
         2, RUMBLE_CUTOFF / (SR / 2.0), btype="low", ftype="butter"
     )
     rumble_zi = lfilter_zi(rumble_b, rumble_a) * 0.0
     bp_zi = np.zeros(2)
 
-    # --- 3-band biquad states ---
     low_zi = np.zeros(2)
     mid_zi = np.zeros(2)
     high_zi = np.zeros(2)
-
-    # --- pink noise state (one zi per pole) ---
     pink_zis = [np.zeros(1) for _ in PINK_POLES]
-
-    # --- gust + Q-drift LFO state (block-rate one-pole random walks) ---
     gust_state = 0.0
     q_drift_state = 0.0
 
-    # --- bourdon voices: narrow bandpass on the same pink noise. zi persists across blocks
-    # so coef changes (player moves the theremin) don't click. ---
+    # zi persists across blocks so coef changes (player moves the theremin) don't click.
     bourd_root_zi = np.zeros(2)
     bourd_fifth_zi = np.zeros(2)
     bourd_third_zi = np.zeros(2)
 
-    # control smoothing
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
     alpha_smooth = 1.0 - math.exp(-1.0 / max(tau_blocks, 1.0))
 
@@ -131,7 +123,7 @@ def make_audio_callback(state: State):
         f = max(60.0, min(SR * 0.45, state.cur_freq))
         amp = max(0.0, min(1.0, state.cur_amp))
 
-        # --- pink noise source (Paul Kellet's 6-pole IIR + white passthrough) ---
+        # Paul Kellet's 6-pole IIR + white passthrough.
         white = rng.standard_normal(frames).astype(np.float64) * 0.4
         src = white * PINK_DIRECT
         for i, (pole, gain) in enumerate(zip(PINK_POLES, PINK_GAINS)):
@@ -152,7 +144,6 @@ def make_audio_callback(state: State):
         else:
             q_mod = 1.0
 
-        # --- synthesis ---
         if use_3band:
             tilt = (math.log(f) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
             tilt = max(0.0, min(1.0, tilt))
@@ -216,7 +207,6 @@ def make_audio_callback(state: State):
         else:
             outdata[:] = mix32[:, None]
 
-        # expose for TUI display
         state.cur_tilt = (math.log(max(60.0, f)) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
 
     return callback
