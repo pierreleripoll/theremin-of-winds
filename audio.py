@@ -90,6 +90,15 @@ def make_audio_callback(state: State):
 
     rng = np.random.default_rng()
 
+    def lfo_step(prev: float, alpha: float, depth: float) -> tuple[float, float]:
+        """One block of a unit-variance random-walk LFO. Returns (new_state, mod)
+        where mod ∈ [1-depth, 1+depth] is meant to multiply amp/Q. The norm
+        rescales because a one-pole on unit-variance noise has stationary
+        stddev sqrt(alpha/(2-alpha))."""
+        new_state = (1.0 - alpha) * prev + alpha * rng.standard_normal()
+        norm = math.sqrt((2.0 - alpha) / alpha)
+        return new_state, 1.0 + depth * math.tanh(new_state * norm * 0.7)
+
     def callback(outdata, frames, time_info, status):
         nonlocal rumble_zi, bp_zi, low_zi, mid_zi, high_zi, gust_state, q_drift_state
         nonlocal bourd_root_zi, bourd_fifth_zi, bourd_third_zi
@@ -130,24 +139,16 @@ def make_audio_callback(state: State):
             src = src + y
         src *= PINK_SCALE
 
-        # --- gust LFO: unit-variance random walk -> tanh -> ±depth around 1.0 ---
         if use_gust:
             gust_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(gust_tau_s, 0.05))
-            gust_state = (1.0 - gust_alpha) * gust_state + gust_alpha * rng.standard_normal()
-            # one-pole on unit-variance noise has stationary stddev sqrt(a/(2-a));
-            # rescale so gust_norm has unit variance and `depth` is meaningful.
-            norm = math.sqrt((2.0 - gust_alpha) / gust_alpha)
-            gust_mod = 1.0 + gust_depth * math.tanh(gust_state * norm * 0.7)
+            gust_state, gust_mod = lfo_step(gust_state, gust_alpha, gust_depth)
         else:
             gust_mod = 1.0
         amp_eff = amp * gust_mod
 
-        # --- Q drift: same shape as gust, but on resonance (no theremin control over Q) ---
         if q_drift_depth > 0.0:
             q_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(q_drift_tau_s, 0.05))
-            q_drift_state = (1.0 - q_alpha) * q_drift_state + q_alpha * rng.standard_normal()
-            q_norm = math.sqrt((2.0 - q_alpha) / q_alpha)
-            q_mod = 1.0 + q_drift_depth * math.tanh(q_drift_state * q_norm * 0.7)
+            q_drift_state, q_mod = lfo_step(q_drift_state, q_alpha, q_drift_depth)
         else:
             q_mod = 1.0
 
