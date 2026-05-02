@@ -72,26 +72,20 @@ def main():
         return
 
     if args.fake:
-        from trackpad import find_touchpad, trackpad_loop
         try:
-            import evdev  # noqa: F401
+            from trackpad import open_touchpad, trackpad_loop
+            tpad = open_touchpad(args.trackpad_dev)
         except ImportError:
             sys.exit("--fake needs the 'evdev' package: uv pip install --python .venv/bin/python evdev")
-        try:
-            if args.trackpad_dev:
-                import evdev as _ev
-                tpad = _ev.InputDevice(args.trackpad_dev)
-            else:
-                tpad = find_touchpad()
-                if tpad is None:
-                    sys.exit(
-                        "no touchpad found. Either pass --trackpad-dev /dev/input/eventN, "
-                        "or join the 'input' group: sudo usermod -aG input $USER  (then re-login)"
-                    )
         except PermissionError:
             sys.exit(
-                f"permission denied opening touchpad. Join the 'input' group:\n"
-                f"  sudo usermod -aG input $USER   (then log out / log back in)"
+                "permission denied opening touchpad. Join the 'input' group:\n"
+                "  sudo usermod -aG input $USER   (then log out / log back in)"
+            )
+        except FileNotFoundError:
+            sys.exit(
+                "no touchpad found. Either pass --trackpad-dev /dev/input/eventN, "
+                "or join the 'input' group: sudo usermod -aG input $USER  (then re-login)"
             )
         port = f"{tpad.path}  [{tpad.name}]"
     else:

@@ -33,6 +33,21 @@ def find_touchpad():
     return None
 
 
+def open_touchpad(dev_path: str | None):
+    """Open the requested touchpad, or autodetect one.
+
+    Raises ImportError if `evdev` isn't installed, PermissionError if /dev/input
+    devices exist but aren't readable, FileNotFoundError if no touchpad matches.
+    """
+    import evdev
+    if dev_path:
+        return evdev.InputDevice(dev_path)
+    tpad = find_touchpad()
+    if tpad is None:
+        raise FileNotFoundError("no touchpad found")
+    return tpad
+
+
 def trackpad_loop(state: State, dev, grab: bool = False):
     """Read absolute X/Y from a touchpad and drive State.fake_xy.
 
