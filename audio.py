@@ -206,18 +206,15 @@ def make_audio_callback(state: State):
             # high-Q bandpass on noise has low RMS; boost so the whistle sits with the wind.
             mix = mix + (voices / n_voices) * amp_eff * tone_level * 4.0
 
-        mix = np.tanh(mix * drive)
+        mix32 = np.tanh(mix * drive).astype(np.float32)
 
         n_ch = outdata.shape[1]
         if spatial_mode and n_ch >= 2:
-            gains = pan_gains(state.cur_position, n_ch, pan_floor)
-            mix32 = mix.astype(np.float32)
-            for c in range(n_ch):
-                outdata[:, c] = mix32 * gains[c]
+            gains = np.asarray(pan_gains(state.cur_position, n_ch, pan_floor),
+                               dtype=np.float32)
+            outdata[:] = mix32[:, None] * gains
         else:
-            mix32 = mix.astype(np.float32)
-            for c in range(n_ch):
-                outdata[:, c] = mix32
+            outdata[:] = mix32[:, None]
 
         # expose for TUI display
         state.cur_tilt = (math.log(max(60.0, f)) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
