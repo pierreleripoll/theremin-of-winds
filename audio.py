@@ -19,7 +19,8 @@ import numpy as np
 from scipy.signal import iirfilter, lfilter, lfilter_zi
 
 from config import (
-    BLOCK, FREQ_HI, FREQ_LO, RUMBLE_CUTOFF, SMOOTH_MS, SR,
+    AMP_EPS, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S, RUMBLE_CUTOFF,
+    SMOOTH_MS, SR,
 )
 from state import State
 
@@ -80,6 +81,12 @@ def make_audio_callback(state: State):
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
     alpha_smooth = 1.0 - math.exp(-1.0 / max(tau_blocks, 1.0))
 
+    # auto-wind presence gate (see config.py): the firmware stops sending MIDI when
+    # no hand is near, so we fade the output out once messages stop arriving.
+    presence = 0.0
+    last_msg_count = 0
+    blocks_since_msg = 0
+
     rng = np.random.default_rng()
 
     def lfo_step(prev: float, alpha: float, depth: float) -> tuple[float, float]:
@@ -94,11 +101,14 @@ def make_audio_callback(state: State):
     def callback(outdata, frames, time_info, status):
         nonlocal rumble_zi, bp_zi, low_zi, mid_zi, high_zi, gust_state, q_drift_state
         nonlocal bourd_root_zi, bourd_fifth_zi, bourd_third_zi
+        nonlocal presence, last_msg_count, blocks_since_msg
         if status:
             print(f"[audio] {status}", file=sys.stderr)
 
         with state.lock:
             tf, ta = state.target_freq, state.target_amp
+            release_s = state.release_s
+            msg_count = state.msg_count
             use_3band = state.use_3band
             use_gust = state.use_gust
             use_fifth = state.use_fifth
@@ -120,8 +130,23 @@ def make_audio_callback(state: State):
         state.cur_freq += (tf - state.cur_freq) * alpha_smooth
         state.cur_amp += (ta - state.cur_amp) * alpha_smooth
         state.cur_position += (tp - state.cur_position) * alpha_smooth
+
+        # idle = no new MIDI messages for IDLE_TIMEOUT_S (firmware went quiet).
+        if msg_count != last_msg_count:
+            last_msg_count = msg_count
+            blocks_since_msg = 0
+        else:
+            blocks_since_msg += 1
+        if blocks_since_msg >= IDLE_TIMEOUT_S * SR / BLOCK:
+            rel_tau_blocks = max(release_s, 0.05) * SR / BLOCK
+            presence += (0.0 - presence) * (1.0 - math.exp(-1.0 / rel_tau_blocks))
+            if presence < AMP_EPS:
+                presence = 0.0  # truly silent
+        else:
+            presence += (1.0 - presence) * alpha_smooth  # fast attack
+
         f = max(60.0, min(SR * 0.45, state.cur_freq))
-        amp = max(0.0, min(1.0, state.cur_amp))
+        amp = max(0.0, min(1.0, state.cur_amp)) * presence
 
         # Paul Kellet's 6-pole IIR + white passthrough.
         white = rng.standard_normal(frames).astype(np.float64) * 0.4

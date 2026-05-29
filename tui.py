@@ -39,6 +39,7 @@ KNOB_DEFS = MACROS + [
     Knob("tone level  ", "tone_level",   0.0,   1.0,   0.05, "{:>6.2f}   "),
     Knob("bourdon Q   ", "bourdon_q",    2.0,  30.0,   1.0,  "{:>6.1f}   "),
     Knob("pan floor   ", "pan_floor",    0.0,   0.5,   0.02, "{:>6.2f}   "),
+    Knob("release     ", "release_s",    0.2,  10.0,   0.2,  "{:>6.1f} s "),
 ]
 MACRO_ATTRS = {k.attr for k in MACROS}
 
