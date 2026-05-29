@@ -106,6 +106,10 @@ class State:
 
     def cc(self, num: int, val: int):
         self.last_cc = (num, val)
+        if num in (120, 123):  # All Sound Off / All Notes Off -> the mute button
+            self.note = None
+            self.target_amp = 0.0
+            return
         if num in (1, 7, 11, 74):
             if self.spatial_mode:
                 # left hand = pan; amp stays at its note-on value.
