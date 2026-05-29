@@ -4,11 +4,11 @@ The OpenTheremin V4 MIDI firmware sends raw MIDI bytes over USB serial at
 31250 baud (it is NOT a USB-MIDI device). This module reads that stream
 inline and dispatches into State.
 """
-import glob
 import sys
 import time
 
 import serial
+import serial.tools.list_ports
 
 from state import State
 
@@ -100,12 +100,22 @@ def serial_loop(state: State, port: str, baud: int, debug: bool):
             time.sleep(2.0)
 
 
-SERIAL_GLOBS = ("/dev/ttyACM*", "/dev/ttyUSB*")
+# The OpenTheremin V4 talks over a CH340 USB-serial bridge (WCH, USB vendor
+# 0x1a86). Prefer it over any other USB-serial device: audio interfaces like
+# the MOTU M2 also expose a serial control port that sorts ahead of ttyUSB0
+# and would otherwise be picked first, leaving the synth listening to silence.
+THEREMIN_VIDS = (0x1A86,)
 
 
 def list_serial_ports() -> list[str]:
-    """Sorted list of candidate serial ports (USB CDC + USB-serial chips)."""
-    return sorted(p for pattern in SERIAL_GLOBS for p in glob.glob(pattern))
+    """Candidate USB-serial ports, theremin (CH340) first.
+
+    Filters to real USB devices (those report a vendor id), dropping the
+    motherboard's legacy /dev/ttyS* ports.
+    """
+    ports = [p for p in serial.tools.list_ports.comports() if p.vid is not None]
+    ports.sort(key=lambda p: (p.vid not in THEREMIN_VIDS, p.device))
+    return [p.device for p in ports]
 
 
 def find_serial_port(requested: str | None) -> str:
@@ -114,6 +124,6 @@ def find_serial_port(requested: str | None) -> str:
     candidates = list_serial_ports()
     if not candidates:
         raise RuntimeError(
-            "no /dev/ttyACM* or /dev/ttyUSB* found — is the OpenTheremin plugged in?"
+            "no USB-serial port found — is the OpenTheremin plugged in?"
         )
     return candidates[0]
