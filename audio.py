@@ -9,6 +9,13 @@ Signal flow per block:
     → tanh saturation (drive knob)
     → optional stereo pan (spatial mode)
 
+Organ mode layers a pipe-organ drone on top of the wind voice (it does not replace
+it): an additive harmonic stack (sine partials at multiples of a deep root note)
+blended with pink noise resonating at the same harmonics (the "air in the metal
+tube"). It is driven by the SAME gust LFO as the wind, which swells, brightens, and
+sharpens it together with the audible wind — so it sounds like wind resonating a
+building, not a separate organ. The sweep is compressed onto a narrow bass range.
+
 Filter coefficients are recomputed per block (cheap), so any knob change takes
 effect within ~10 ms.
 """
@@ -30,6 +37,27 @@ PINK_POLES = [0.99886, 0.99332, 0.96900, 0.86650, 0.55000, -0.7616]
 PINK_GAINS = [0.0555179, 0.0750759, 0.1538520, 0.3104856, 0.5329522, -0.0168980]
 PINK_DIRECT = 0.5362
 PINK_SCALE = 0.11
+
+# Pipe organ "principal chorus": harmonic multiples of the played pitch and their
+# raw levels (8' 4' 2-2/3' 2' 1-3/5' 1-1/3' 1'). The 7th harmonic is skipped — no
+# classical organ rank sits at 7x. Levels are normalized to sum 1 at synth time so
+# the worst-case aligned peak stays <= 1 before any gain.
+ORGAN_MULTS = np.array([1, 2, 3, 4, 5, 6, 8], dtype=np.float64)
+ORGAN_AMPS = np.array([1.00, 0.55, 0.30, 0.22, 0.13, 0.10, 0.07], dtype=np.float64)
+ORGAN_GAIN = 0.85   # headroom so the bright partials aren't crushed by the tanh
+BRIGHT_TAPER = 0.7  # how far organ_brightness can pull down the partials above the root
+AIR_Q = 9.0         # resonance of the "air in the tube" bandpasses (higher = more whistly)
+AIR_BOOST = 4.0     # high-Q bandpass on noise has low RMS; boost it to sit with the tone
+ORGAN_WAVER = 0.006 # depth of the slow random pitch waver (natural wind detune)
+ORGAN_WAVER_TAU = 1.2  # pitch waver correlation time (s)
+# Wind coupling: a gust above/below the wind's mean also brightens and sharpens the
+# organ (like rising air pressure overblowing a flue pipe), so it tracks the wind.
+ORGAN_WIND_BRIGHT = 0.6  # how much a gust brightens the organ
+ORGAN_WIND_PITCH = 0.01  # how much a gust sharpens the organ pitch
+# Organ is a narrow bass drone, not a wide melodic voice: the theremin's full sweep
+# is compressed onto a deep root note spanning only ORGAN_RANGE_SEMIS semitones.
+ORGAN_BASE_HZ = 220.0     # lowest organ note at octave 0 (hand at the bottom of the sweep)
+ORGAN_RANGE_SEMIS = 7.0   # how many semitones the whole sweep spans above the base
 
 
 def pan_gains(position: float, n_channels: int, floor: float = 0.0) -> tuple[float, ...]:
@@ -78,6 +106,12 @@ def make_audio_callback(state: State):
     bourd_fifth_zi = np.zeros(2)
     bourd_third_zi = np.zeros(2)
 
+    # organ-mode oscillator + tremulant phase, carried across blocks like the zi above.
+    organ_phase = 0.0
+    trem_phase = 0.0
+    organ_waver_state = 0.0  # slow random-walk pitch waver
+    organ_air_zi = [np.zeros(2), np.zeros(2), np.zeros(2)]  # resonant air bands (f0, 2f0, 3f0)
+
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
     alpha_smooth = 1.0 - math.exp(-1.0 / max(tau_blocks, 1.0))
 
@@ -101,6 +135,7 @@ def make_audio_callback(state: State):
     def callback(outdata, frames, time_info, status):
         nonlocal rumble_zi, bp_zi, low_zi, mid_zi, high_zi, gust_state, q_drift_state
         nonlocal bourd_root_zi, bourd_fifth_zi, bourd_third_zi
+        nonlocal organ_phase, trem_phase, organ_waver_state
         nonlocal presence, last_msg_count, blocks_since_msg
         if status:
             print(f"[audio] {status}", file=sys.stderr)
@@ -114,6 +149,11 @@ def make_audio_callback(state: State):
             use_gust = state.use_gust
             use_fifth = state.use_fifth
             third_mode = state.third_mode
+            organ_mode = state.organ_mode
+            organ_octave = state.organ_octave
+            organ_brightness = state.organ_brightness
+            organ_air, organ_wind = state.organ_air, state.organ_wind
+            trem_depth, trem_rate, trem_pitch = state.trem_depth, state.trem_rate, state.trem_pitch
             tone_level = state.tone_level
             bourdon_q = state.bourdon_q
             spatial_mode = state.spatial_mode
@@ -159,12 +199,15 @@ def make_audio_callback(state: State):
             src = src + y
         src *= PINK_SCALE
 
-        if use_gust:
+        # Wind voice (always on). Organ mode layers a pipe-organ drone on top.
+        # The gust LFO is the wind's slow breath; compute it whenever the wind OR the
+        # organ needs it, so the organ can couple to the same gusting (see below).
+        if use_gust or organ_mode:
             gust_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(gust_tau_s, 0.05))
             gust_state, gust_mod = lfo_step(gust_state, gust_alpha, gust_depth)
         else:
             gust_mod = 1.0
-        amp_eff = amp * gust_mod
+        amp_eff = amp * gust_mod if use_gust else amp
 
         if q_drift_depth > 0.0:
             q_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(q_drift_tau_s, 0.05))
@@ -224,6 +267,64 @@ def make_audio_callback(state: State):
 
             # high-Q bandpass on noise has low RMS; boost so the whistle sits with the wind.
             mix = mix + (voices / n_voices) * amp_eff * tone_level * 4.0
+
+        # Organ voice: a pipe-organ drone driven by the same wind you hear as noise.
+        if organ_mode:
+            # gust_dev = how hard the wind is blowing right now vs its mean. It is the
+            # wind's slow breath (shared with the noise voice above), and we let it
+            # swell, brighten, and sharpen the organ together with the audible wind so
+            # the two feel like one system — wind resonating a building. organ_wind
+            # sets how tightly the organ tracks it.
+            gust_dev = gust_mod - 1.0
+            waver_alpha = 1.0 - math.exp(-(frames / SR) / ORGAN_WAVER_TAU)
+            organ_waver_state, waver_mod = lfo_step(organ_waver_state, waver_alpha, ORGAN_WAVER)
+            trem_phase = math.fmod(trem_phase + 2.0 * math.pi * trem_rate * frames / SR,
+                                   2.0 * math.pi)
+            trem = math.sin(trem_phase)
+            organ_amp_eff = amp * (1.0 + organ_wind * gust_dev) * (1.0 + trem_depth * trem)
+            bright = min(1.0, max(0.0, organ_brightness + ORGAN_WIND_BRIGHT * organ_wind * gust_dev))
+
+            # compress the theremin's full sweep onto a narrow bass range: recover the
+            # hand position (0..1) from the pitch, then span only ORGAN_RANGE_SEMIS
+            # semitones above a deep base note. waver + vibrato + the wind's overblow
+            # (gust_dev) detune it slightly for a living, wind-driven pitch.
+            ratio = (math.log(f) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
+            ratio = max(0.0, min(1.0, ratio))
+            f0 = ORGAN_BASE_HZ * (2.0 ** organ_octave) * (2.0 ** (ratio * ORGAN_RANGE_SEMIS / 12.0))
+            f0 = f0 * waver_mod * (1.0 + trem_pitch * trem) * (1.0 + ORGAN_WIND_PITCH * organ_wind * gust_dev)
+            f0 = max(20.0, min(SR * 0.45, f0))
+
+            # principal chorus partials at multiples of the root.
+            keep = (ORGAN_MULTS * f0) < (SR * 0.45)
+            keep[0] = True  # the fundamental always plays
+            mults = ORGAN_MULTS[keep]
+            amps = ORGAN_AMPS[keep].copy()
+            # brightness (wind-coupled) pulls down the partials above the root;
+            # renormalize so the overall level holds as it moves.
+            amps[mults >= 2.0] *= (1.0 - BRIGHT_TAPER) + BRIGHT_TAPER * bright
+            amps /= max(amps.sum(), 1e-9)
+
+            # One fundamental phase, carried across blocks; harmonic k is exactly
+            # k * phase, so the partials stay phase-locked and seamless at block joins.
+            n = np.arange(frames, dtype=np.float64)
+            phase = organ_phase + (2.0 * math.pi * f0 / SR) * n
+            stack = (amps[:, None] * np.sin(mults[:, None] * phase[None, :])).sum(axis=0)
+            organ_phase = math.fmod(organ_phase + 2.0 * math.pi * f0 * frames / SR,
+                                    2.0 * math.pi)
+
+            # "air in the metal tube": pink noise resonating at the tube's first few
+            # harmonics, so the breath is pitched (whistling through the pipe), not
+            # broadband hiss. This is what makes it sound like wind, not a synth organ.
+            air = 0.0
+            if organ_air > 0.0:
+                for j, (k, w) in enumerate(((1.0, 1.0), (2.0, 0.6), (3.0, 0.4))):
+                    fk = f0 * k
+                    if fk < SR * 0.45:
+                        ab, aa = build_biquad_bandpass(fk, AIR_Q, SR)
+                        band, organ_air_zi[j] = lfilter(ab, aa, src, zi=organ_air_zi[j])
+                        air = air + band * w
+
+            mix = mix + (stack * ORGAN_GAIN + air * AIR_BOOST * organ_air) * organ_amp_eff
 
         mix32 = np.tanh(mix * drive).astype(np.float32)
 

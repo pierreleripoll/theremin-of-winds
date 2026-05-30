@@ -49,6 +49,9 @@ def main():
                     help="start with single-bandpass synth (toggle live with '3')")
     ap.add_argument("--no-gust", action="store_true",
                     help="start with gust LFO off (toggle live with 'g')")
+    ap.add_argument("--organ", action="store_true",
+                    help="start in pipe-organ mode: additive harmonic voice + tremulant "
+                         "instead of the wind voice (toggle live with 'o')")
     ap.add_argument("--spatial", action="store_true",
                     help="start in spatial mode: pitch antenna pans the wind L↔R "
                          "(toggle live with 's'); wind pitch becomes a fixed knob")
@@ -96,6 +99,7 @@ def main():
     state = State()
     state.use_3band = not args.no_3band
     state.use_gust = not args.no_gust
+    state.organ_mode = args.organ
     state.spatial_mode = args.spatial
 
     cb = make_audio_callback(state)

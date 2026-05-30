@@ -7,9 +7,11 @@ then synthesizes without holding it.
 import threading
 
 from config import (
-    ATTACK_S, DRIVE, FREQ_HI, FREQ_LO, GUST_DEPTH, GUST_TAU_S, HIGH_BAND_GAIN,
-    HIGH_FC, HIGH_Q, LOW_FC, LOW_Q, MID_FC_HI, MID_FC_LO, MID_Q_MAX,
-    NOTE_HI, NOTE_LO, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
+    ATTACK_S, DRIVE, FREQ_HI, FREQ_LO, GUST_DEPTH, GUST_TAU_S,
+    HIGH_BAND_GAIN, HIGH_FC, HIGH_Q, LOW_FC, LOW_Q, MID_FC_HI, MID_FC_LO,
+    MID_Q_MAX, NOTE_HI, NOTE_LO, ORGAN_AIR, ORGAN_BRIGHTNESS,
+    ORGAN_OCTAVE, ORGAN_WIND, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
+    TREM_DEPTH, TREM_PITCH, TREM_RATE,
 )
 
 
@@ -32,6 +34,7 @@ class State:
         self.use_gust = True
         self.use_fifth = False
         self.third_mode = 0  # 0=off, 1=minor (6:5), 2=major (5:4)
+        self.organ_mode = False  # additive pipe-organ voice (replaces the wind voice)
         # knobs (TUI-editable)
         self.low_fc = LOW_FC
         self.low_q = LOW_Q
@@ -48,6 +51,14 @@ class State:
         self.mid_q_max = MID_Q_MAX
         self.tone_level = 0.0  # bourdon voice (pitched-wind intervals) added on top of wind
         self.bourdon_q = 12.0  # higher = narrower whistle, more pitched; lower = airier
+        # organ mode knobs (only active when organ_mode is on)
+        self.organ_octave = ORGAN_OCTAVE  # octave of the lowest organ note (-3 = deep pedal)
+        self.organ_brightness = ORGAN_BRIGHTNESS  # 0 = dark/bassy, 1 = full bright chorus
+        self.organ_air = ORGAN_AIR        # resonant "air in the metal tube" amount
+        self.organ_wind = ORGAN_WIND      # how strongly the wind's gusting drives the organ
+        self.trem_depth = TREM_DEPTH      # gentle periodic tremulant amplitude
+        self.trem_rate = TREM_RATE        # tremulant rate (Hz)
+        self.trem_pitch = TREM_PITCH      # periodic pitch vibrato (fractional)
         # spatial mode: pitch antenna keeps its normal pitch role; volume antenna (CC)
         # drives stereo pan position. Amplitude stays at the note-on velocity level.
         self.spatial_mode = False

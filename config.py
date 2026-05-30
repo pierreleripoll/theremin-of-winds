@@ -50,3 +50,14 @@ HIGH_BAND_GAIN = 0.45
 # Mid-band Q amp ramp. mid_Q = 1.2 + MID_Q_MAX * amp^0.6, so larger -> louder
 # play means narrower (more whistly) mid band. 0 disables the ramp entirely.
 MID_Q_MAX = 4.0
+
+# Pipe organ mode (toggle with 'o'): an additive harmonic stack (the way an organ
+# stacks pipe ranks) blended with pink noise resonating in the "tube", so it sounds
+# like wind howling through metal pipes (aeolian) rather than a clean electronic organ.
+ORGAN_OCTAVE = -2.0        # octave of the lowest organ note (-3 = very deep pedal bass)
+ORGAN_BRIGHTNESS = 0.35    # tilts the upper partials: 0 = dark/bassy, 1 = full bright chorus
+ORGAN_AIR = 0.45           # resonant "air in the metal tube" (pitched breath through the pipe)
+ORGAN_WIND = 0.7           # how strongly the wind's gusting drives the organ (swell/bright/pitch)
+TREM_DEPTH = 0.05          # gentle periodic tremulant on top of the swell (amplitude)
+TREM_RATE = 5.5            # tremulant rate (Hz; classic organ tremulant is 5-6 Hz)
+TREM_PITCH = 0.003         # periodic pitch vibrato, fractional (~5 cents)
