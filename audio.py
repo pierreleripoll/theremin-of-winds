@@ -107,6 +107,7 @@ def make_audio_callback(state: State):
 
         with state.lock:
             tf, ta = state.target_freq, state.target_amp
+            attack_s = state.attack_s
             release_s = state.release_s
             msg_count = state.msg_count
             use_3band = state.use_3band
@@ -143,7 +144,9 @@ def make_audio_callback(state: State):
             if presence < AMP_EPS:
                 presence = 0.0  # truly silent
         else:
-            presence += (1.0 - presence) * alpha_smooth  # fast attack
+            # spin up from zero over attack_s so the sound doesn't pop on
+            att_tau_blocks = max(attack_s, 0.01) * SR / BLOCK
+            presence += (1.0 - presence) * (1.0 - math.exp(-1.0 / att_tau_blocks))
 
         f = max(60.0, min(SR * 0.45, state.cur_freq))
         amp = max(0.0, min(1.0, state.cur_amp)) * presence

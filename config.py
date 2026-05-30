@@ -16,8 +16,11 @@ SMOOTH_MS = 12.0  # one-pole tau on target freq/amp; 60 ms felt laggy in --fake 
 # instrument, so "nobody playing" = no messages for IDLE_TIMEOUT_S. (While playing,
 # the antennas always jitter, so messages keep flowing even for a held note.) When
 # idle, a presence envelope releases over RELEASE_S so the sound fades out smoothly;
-# the slow release also bridges brief gaps so a momentary dropout doesn't cut.
-RELEASE_S = 1.5         # fade-out time once input stops (seconds; TUI knob)
+# the slow release also bridges brief gaps so a momentary dropout doesn't cut. When
+# input resumes the envelope attacks over ATTACK_S, so the sound spins up from zero
+# like a wind turbine rather than popping on.
+ATTACK_S = 0.4          # spin-up time when input resumes (seconds; TUI knob)
+RELEASE_S = 0.6         # fade-out time once input stops (seconds; TUI knob)
 IDLE_TIMEOUT_S = 0.4    # no MIDI for this long -> start fading
 AMP_EPS = 1e-3          # snap presence to 0 below this (truly silent)
 

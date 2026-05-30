@@ -7,7 +7,7 @@ then synthesizes without holding it.
 import threading
 
 from config import (
-    DRIVE, FREQ_HI, FREQ_LO, GUST_DEPTH, GUST_TAU_S, HIGH_BAND_GAIN,
+    ATTACK_S, DRIVE, FREQ_HI, FREQ_LO, GUST_DEPTH, GUST_TAU_S, HIGH_BAND_GAIN,
     HIGH_FC, HIGH_Q, LOW_FC, LOW_Q, MID_FC_HI, MID_FC_LO, MID_Q_MAX,
     NOTE_HI, NOTE_LO, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
 )
@@ -21,6 +21,7 @@ class State:
         self.target_amp = 0.0
         self.cur_freq = 800.0
         self.cur_amp = 0.0
+        self.attack_s = ATTACK_S  # auto-wind spin-up time (TUI knob)
         self.release_s = RELEASE_S  # auto-wind fade-out time (TUI knob)
         self.note: int | None = None
         self.pitch_bend = 0  # signed: -8192..+8191
