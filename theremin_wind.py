@@ -122,11 +122,33 @@ def main():
     ):
         if use_tui:
             import curses
+            import os
+            import tempfile
             from tui import tui_loop
+
+            # The MIDI thread and the audio callback (and PortAudio/ALSA beneath it)
+            # write diagnostics to stdout/stderr — e.g. "[audio] <status>" on every
+            # xrun. While curses owns the terminal those writes scroll it underneath
+            # the display, and since curses can't see the scroll the top row appears
+            # to duplicate. Curses draws to the tty via fd 1, so we leave fd 1 alone
+            # and send stdout (Python) plus stderr (fd 2, incl. C-level spam) to a
+            # log file for the lifetime of the TUI, then restore them.
+            log_path = os.path.join(tempfile.gettempdir(), "theremin_wind.log")
+            logf = open(log_path, "a", buffering=1)
+            saved_out, saved_err = sys.stdout, sys.stderr
+            saved_err_fd = os.dup(2)
+            sys.stdout = sys.stderr = logf
+            os.dup2(logf.fileno(), 2)
             try:
                 curses.wrapper(tui_loop, state, port, args.baud, args.fake)
             except KeyboardInterrupt:
                 pass
+            finally:
+                os.dup2(saved_err_fd, 2)
+                os.close(saved_err_fd)
+                sys.stdout, sys.stderr = saved_out, saved_err
+                logf.close()
+            print(f"[main] TUI diagnostics were logged to {log_path}")
         else:
             print(f"[synth] 3band={state.use_3band} gust={state.use_gust}")
             print("[main] ctrl-c to stop. play your theremin.")
