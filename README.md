@@ -29,9 +29,36 @@ uv pip install --python .venv/bin/python mido python-rtmidi sounddevice numpy sc
 .venv/bin/python theremin_wind.py --debug    # prints every MIDI message (no TUI)
 .venv/bin/python theremin_wind.py --no-tui   # play without the TUI
 .venv/bin/python theremin_wind.py --list     # show serial + audio devices
+.venv/bin/python theremin_wind.py --dmx      # also drive a fan over DMX (see below)
 ```
 
 Press `q` to quit.
+
+## Blowing a real fan (DMX)
+
+If you have an [Enttec DMX USB Pro](https://www.enttec.com/product/lighting-communication-protocols/dmx512/dmx-usb-pro-interface/) driving a fan through a power dimmer, `--dmx` turns the fan full-on whenever the synth is making sound and off when it goes idle — so the air actually moves while the wind plays.
+
+```bash
+.venv/bin/python theremin_wind.py --dmx                  # autodetect the Enttec, fan on channel 50
+.venv/bin/python theremin_wind.py --dmx --dmx-mode dim    # fan speed tracks wind intensity
+.venv/bin/python theremin_wind.py --dmx --dmx-channel 12 # different dimmer address
+.venv/bin/python theremin_wind.py --dmx --dmx-port /dev/ttyUSB1
+```
+
+Two modes:
+
+- `--dmx-mode switch` (default): fan full-on whenever there's sound, off when idle. Set the dimmer channel to **switch / non-dim** so it's a clean on/off (no buzz, no idle creep).
+- `--dmx-mode dim`: fan speed follows the wind's intensity. Set the dimmer channel to **gradation / dimmer** mode. A fan won't start at low voltage, so `--dmx-min N` sets the floor it spins at (default 80/255) — find your fan's start point with `dmx_test.py` below.
+
+The Enttec is found automatically by its USB id, so it never clashes with the theremin. In the TUI, press `d` to toggle the fan output live. The fan briefly holds on between notes so the dimmer doesn't flicker, and blacks out cleanly on quit.
+
+`dmx_test.py` drives one channel to a fixed value, with the synth out of the picture — handy for checking wiring and finding the fan's start level:
+
+```bash
+.venv/bin/python dmx_test.py 50 255   # channel 50 full on
+.venv/bin/python dmx_test.py 50 90    # find the lowest level that still spins the fan
+.venv/bin/python dmx_test.py 0 255    # ALL channels full (ignore addressing while debugging)
+```
 
 ## The interface
 

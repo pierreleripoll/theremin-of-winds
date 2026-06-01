@@ -190,6 +190,7 @@ def make_audio_callback(state: State):
 
         f = max(60.0, min(SR * 0.45, state.cur_freq))
         amp = max(0.0, min(1.0, state.cur_amp)) * presence
+        state.sound_level = float(amp)  # read by the DMX thread to gate the fan
 
         # Paul Kellet's 6-pole IIR + white passthrough.
         white = rng.standard_normal(frames).astype(np.float64) * 0.4

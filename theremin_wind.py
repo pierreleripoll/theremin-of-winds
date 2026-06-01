@@ -28,7 +28,8 @@ import time
 import sounddevice as sd
 
 from audio import make_audio_callback
-from config import BAUD, BLOCK, SR
+from config import BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, SR
+from dmx import dmx_loop, find_dmx_port
 from midi import find_serial_port, list_serial_ports, serial_loop
 from state import State
 
@@ -61,6 +62,18 @@ def main():
                     help="path to /dev/input/eventN for the touchpad (default: autodetect)")
     ap.add_argument("--grab", action="store_true",
                     help="(fake mode) grab the touchpad exclusively so it doesn't move the cursor")
+    ap.add_argument("--dmx", action="store_true",
+                    help="drive a DMX fan via an Enttec DMX USB Pro: full-on while the synth "
+                         "makes sound, off when idle (toggle live with 'd')")
+    ap.add_argument("--dmx-port",
+                    help="Enttec serial port (default: autodetect the DMX USB Pro)")
+    ap.add_argument("--dmx-channel", type=int, default=DMX_CHANNEL,
+                    help=f"DMX channel driving the fan/dimmer (default {DMX_CHANNEL})")
+    ap.add_argument("--dmx-mode", choices=("switch", "dim"), default="switch",
+                    help="switch = full-on while there's sound (dimmer channel in switch mode); "
+                         "dim = fan speed tracks wind intensity (dimmer channel in gradation mode)")
+    ap.add_argument("--dmx-min", type=int, default=DMX_MIN_LEVEL,
+                    help=f"dim mode: lowest level that still spins the fan (default {DMX_MIN_LEVEL})")
     args = ap.parse_args()
 
     if args.list:
@@ -114,6 +127,23 @@ def main():
         )
     input_thread.start()
 
+    dmx_stop = threading.Event()
+    dmx_thread = None
+    if args.dmx:
+        try:
+            dmx_port = find_dmx_port(args.dmx_port)
+        except RuntimeError as e:
+            sys.exit(str(e))
+        state.dmx_available = True
+        state.dmx_on = True
+        dmx_thread = threading.Thread(
+            target=dmx_loop,
+            args=(state, dmx_port, args.dmx_channel, DMX_ON_LEVEL, dmx_stop, args.debug),
+            kwargs={"proportional": args.dmx_mode == "dim", "min_level": args.dmx_min},
+            daemon=True,
+        )
+        dmx_thread.start()
+
     use_tui = not (args.no_tui or args.debug)
 
     with sd.OutputStream(
@@ -157,6 +187,11 @@ def main():
                     time.sleep(0.5)
             except KeyboardInterrupt:
                 pass
+
+    # blackout the fan and let the DMX thread close its port before we exit.
+    dmx_stop.set()
+    if dmx_thread is not None:
+        dmx_thread.join(timeout=0.5)
     print("\n[main] bye")
 
 

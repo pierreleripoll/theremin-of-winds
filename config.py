@@ -26,6 +26,23 @@ AMP_EPS = 1e-3          # snap presence to 0 below this (truly silent)
 
 BAUD = 31250  # MrDham firmware in "true DIN MIDI" mode (Serial.begin(31250))
 
+# DMX output (Enttec DMX USB Pro, opt-in via --dmx): drive a fan on a power dimmer
+# while the synth makes sound. The dimmer is addressed at channel 50.
+DMX_BAUD = 57600        # FTDI side; the Pro generates DMX timing itself, so this is nominal
+DMX_CHANNEL = 50        # dimmer/fan address (1..512)
+DMX_ON_LEVEL = 255      # channel value at full (switch mode = on; dim mode = loudest wind)
+DMX_FRAME_HZ = 40       # how often we refresh the DMX frame
+DMX_SOUND_EPS = 5e-3    # gated output amplitude above this counts as "making sound"
+DMX_HOLD_S = 0.5        # keep the fan on this long after sound stops (anti-flicker)
+DMX_RAMP_S = 0.25       # smooth the channel value toward its target (gentle on the dimmer)
+# Proportional ("dim") mode: map wind intensity to fan speed. A fan on a triac
+# dimmer won't start spinning below some voltage, so when there's sound we never
+# go below DMX_MIN_LEVEL; the loudest wind (sound level >= DMX_FULL_AT) reaches
+# DMX_ON_LEVEL. Tune DMX_MIN_LEVEL with `dmx_test.py 50 <n>` to where your fan
+# reliably starts.
+DMX_MIN_LEVEL = 80      # lowest level that still spins the fan (0..255)
+DMX_FULL_AT = 0.7       # sound level that maps to DMX_ON_LEVEL
+
 # 3-band synth: fixed low/high band centers, mid band tracks theremin pitch.
 LOW_FC, LOW_Q = 110.0, 0.7
 HIGH_FC, HIGH_Q = 3200.0, 6.0

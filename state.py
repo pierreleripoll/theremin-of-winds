@@ -72,6 +72,13 @@ class State:
         self._whistle = 1.0
         # exposed for the TUI; written by the audio callback each block.
         self.cur_tilt = 0.0
+        # DMX fan output (opt-in via --dmx). The audio callback writes sound_level
+        # (gated output amplitude) each block; the DMX thread reads it to decide
+        # whether the fan is on. dmx_available is set once the thread is running;
+        # dmx_on is the live TUI toggle ('d') gating actual output.
+        self.sound_level = 0.0
+        self.dmx_available = False
+        self.dmx_on = False
 
     @property
     def brightness(self) -> float:

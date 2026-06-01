@@ -98,6 +98,7 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             u5, tm = state.use_fifth, state.third_mode
             org = state.organ_mode
             usp = state.spatial_mode
+            dmxa, dmxon = state.dmx_available, state.dmx_on
             cp = state.cur_position
             knob_vals = [getattr(state, k.attr) for k in KNOB_DEFS]
             note = state.note
@@ -115,13 +116,15 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         _put(stdscr, 0, 0, "─── theremin wind ──────────────────────────────", max_x)
         _put(stdscr, 1, 0,
              f"input: trackpad fake — {port}" if fake else f"midi: {port} @ {baud}", max_x)
-        _put(stdscr, 3, 0,
-             f"features:  [{'x' if u3 else ' '}] 3-band (3)   "
-             f"[{'x' if ug else ' '}] gust (g)   "
-             f"[{'x' if u5 else ' '}] fifth (5)   "
-             f"third: {THIRD_LABELS[tm]} (t)   "
-             f"[{'x' if org else ' '}] organ (o)   "
-             f"[{'x' if usp else ' '}] spatial (s)", max_x)
+        feat = (f"features:  [{'x' if u3 else ' '}] 3-band (3)   "
+                f"[{'x' if ug else ' '}] gust (g)   "
+                f"[{'x' if u5 else ' '}] fifth (5)   "
+                f"third: {THIRD_LABELS[tm]} (t)   "
+                f"[{'x' if org else ' '}] organ (o)   "
+                f"[{'x' if usp else ' '}] spatial (s)")
+        if dmxa:
+            feat += f"   [{'x' if dmxon else ' '}] dmx fan (d)"
+        _put(stdscr, 3, 0, feat, max_x)
 
         hdr = "knobs:  (» = macro)"
         if top > 0:
@@ -148,8 +151,9 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         cc_str = f"last_cc={cc[0]}={cc[1]}" if cc else "last_cc=--"
         _put(stdscr, frow + 2, 2,
              f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  {cc_str}", max_x)
+        toggles = "3/g/5/t/o/s/d" if dmxa else "3/g/5/t/o/s"
         _put(stdscr, frow + 4, 0,
-             "↑↓ select   ←→ adjust   3/g/5/t/o/s toggle   q quit", max_x)
+             f"↑↓ select   ←→ adjust   {toggles} toggle   q quit", max_x)
         stdscr.refresh()
 
         try:
@@ -176,6 +180,8 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                 state.spatial_mode = not state.spatial_mode
                 # re-derive freq/position from current MIDI state under the new mode
                 state.recompute_freq()
+            elif key == ord("d") and state.dmx_available:
+                state.dmx_on = not state.dmx_on
             elif key in (curses.KEY_UP, ord("k")):
                 sel = (sel - 1) % len(KNOB_DEFS)
             elif key in (curses.KEY_DOWN, ord("j")):
