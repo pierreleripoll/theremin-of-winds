@@ -23,3 +23,7 @@ env/
 # Local Claude data
 .claude/
 CLAUDE.md
+
+# Local hardware references / downloaded tools (not part of the synth)
+*.AppImage
+stairville_dds_405_manual.pdf
