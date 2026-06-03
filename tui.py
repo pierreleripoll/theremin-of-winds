@@ -88,6 +88,8 @@ def _put(stdscr, y: int, x: int, text: str, width: int, attr: int = 0):
 
 def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
     import curses
+
+    import presets
     curses.curs_set(0)
     stdscr.nodelay(True)
     stdscr.timeout(100)  # 10 Hz redraw
@@ -96,6 +98,8 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
     FOOTER_H = 6  # blank + live + note + amp + blank + help
     sel = 0
     top = 0  # first visible knob; scrolls to keep `sel` on screen on short terminals
+    status = ""        # transient footer message (e.g. "saved preset")
+    status_frames = 0  # redraws left to keep showing `status`
     while True:
         stdscr.erase()
         with state.lock:
@@ -158,9 +162,12 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         cc_str = f"last_cc={cc[0]}={cc[1]}" if cc else "last_cc=--"
         _put(stdscr, frow + 2, 2,
              f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  {cc_str}", max_x)
+        if status_frames > 0:
+            _put(stdscr, frow + 3, 0, status, max_x, curses.A_BOLD)
+            status_frames -= 1
         toggles = "3/g/5/t/o/s/a/d" if dmxa else "3/g/5/t/o/s/a"
         _put(stdscr, frow + 4, 0,
-             f"↑↓ select   ←→ adjust   {toggles} toggle   q quit", max_x)
+             f"↑↓ select   ←→ adjust   {toggles} toggle   w save   q quit", max_x)
         stdscr.refresh()
 
         try:
@@ -171,6 +178,11 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             continue
         if key in (ord("q"), ord("Q"), 27):  # q or ESC
             break
+        if key in (ord("w"), ord("W")):  # save knobs over the preset file
+            # save_preset takes state.lock itself, so do it outside the lock block.
+            presets.save_preset(state)
+            status, status_frames = f"saved {presets.PRESET_PATH.name}", 20
+            continue
 
         with state.lock:
             if key == ord("3"):

@@ -32,6 +32,7 @@ from autoplay import autoplay_loop
 from config import BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, SR
 from dmx import dmx_loop, find_dmx_port
 from midi import find_serial_port, list_serial_ports, serial_loop
+from presets import load_preset
 from state import State
 from theremin_push import push_loop
 
@@ -121,10 +122,17 @@ def main():
         sd.default.device = (None, args.audio)
 
     state = State()
-    state.use_3band = not args.no_3band
-    state.use_gust = not args.no_gust
-    state.organ_mode = args.organ
-    state.spatial_mode = args.spatial
+    # Restore the saved knobs/toggles (preset.json) if present, then let explicit
+    # CLI flags force a toggle on top of the saved tuning.
+    load_preset(state)
+    if args.no_3band:
+        state.use_3band = False
+    if args.no_gust:
+        state.use_gust = False
+    if args.organ:
+        state.organ_mode = True
+    if args.spatial:
+        state.spatial_mode = True
     state.autoplay_on = args.autoplay
 
     cb = make_audio_callback(state)
