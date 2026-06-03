@@ -110,6 +110,7 @@ def make_audio_callback(state: State):
     organ_phase = 0.0
     trem_phase = 0.0
     organ_waver_state = 0.0  # slow random-walk pitch waver
+    organ_swell = 0.0  # slow envelope: how present the organ is, built by sustained strong wind
     organ_air_zi = [np.zeros(2), np.zeros(2), np.zeros(2)]  # resonant air bands (f0, 2f0, 3f0)
 
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
@@ -135,7 +136,7 @@ def make_audio_callback(state: State):
     def callback(outdata, frames, time_info, status):
         nonlocal rumble_zi, bp_zi, low_zi, mid_zi, high_zi, gust_state, q_drift_state
         nonlocal bourd_root_zi, bourd_fifth_zi, bourd_third_zi
-        nonlocal organ_phase, trem_phase, organ_waver_state
+        nonlocal organ_phase, trem_phase, organ_waver_state, organ_swell
         nonlocal presence, last_msg_count, blocks_since_msg
         if status:
             print(f"[audio] {status}", file=sys.stderr)
@@ -153,6 +154,9 @@ def make_audio_callback(state: State):
             organ_octave = state.organ_octave
             organ_brightness = state.organ_brightness
             organ_air, organ_wind = state.organ_air, state.organ_wind
+            organ_level = state.organ_level
+            organ_threshold = state.organ_threshold
+            organ_rise_s, organ_fall_s = state.organ_rise_s, state.organ_fall_s
             trem_depth, trem_rate, trem_pitch = state.trem_depth, state.trem_rate, state.trem_pitch
             tone_level = state.tone_level
             bourdon_q = state.bourdon_q
@@ -282,7 +286,18 @@ def make_audio_callback(state: State):
             trem_phase = math.fmod(trem_phase + 2.0 * math.pi * trem_rate * frames / SR,
                                    2.0 * math.pi)
             trem = math.sin(trem_phase)
-            organ_amp_eff = amp * (1.0 + organ_wind * gust_dev) * (1.0 + trem_depth * trem)
+
+            # swell with inertia: the organ only builds while the wind sits above
+            # organ_threshold, rising over organ_rise_s and lingering over organ_fall_s.
+            # Strong wind must hold for seconds before the organ is fully present, and
+            # it fades out gradually rather than tracking the wind instantly.
+            demand = max(0.0, (amp - organ_threshold) / max(1e-6, 1.0 - organ_threshold))
+            swell_tau = organ_rise_s if demand > organ_swell else organ_fall_s
+            swell_alpha = 1.0 - math.exp(-(frames / SR) / max(swell_tau, 0.05))
+            organ_swell += (demand - organ_swell) * swell_alpha
+
+            organ_amp_eff = (amp * organ_level * organ_swell
+                             * (1.0 + organ_wind * gust_dev) * (1.0 + trem_depth * trem))
             bright = min(1.0, max(0.0, organ_brightness + ORGAN_WIND_BRIGHT * organ_wind * gust_dev))
 
             # compress the theremin's full sweep onto a narrow bass range: recover the

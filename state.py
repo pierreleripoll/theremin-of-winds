@@ -10,8 +10,9 @@ from config import (
     ATTACK_S, DRIVE, FREQ_HI, FREQ_LO, GUST_DEPTH, GUST_TAU_S,
     HIGH_BAND_GAIN, HIGH_FC, HIGH_Q, LOW_FC, LOW_Q, MID_FC_HI, MID_FC_LO,
     MID_Q_MAX, NOTE_HI, NOTE_LO, ORGAN_AIR, ORGAN_BRIGHTNESS,
-    ORGAN_OCTAVE, ORGAN_WIND, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
-    TREM_DEPTH, TREM_PITCH, TREM_RATE,
+    ORGAN_FALL_S, ORGAN_LEVEL, ORGAN_OCTAVE, ORGAN_RISE_S, ORGAN_THRESHOLD,
+    ORGAN_WIND, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
+    TREM_DEPTH, TREM_PITCH, TREM_RATE, VOL_CURVE,
 )
 
 
@@ -25,6 +26,7 @@ class State:
         self.cur_amp = 0.0
         self.attack_s = ATTACK_S  # auto-wind spin-up time (TUI knob)
         self.release_s = RELEASE_S  # auto-wind fade-out time (TUI knob)
+        self.vol_curve = VOL_CURVE  # exponent shaping the 0..127 volume into amplitude
         self.note: int | None = None
         self.pitch_bend = 0  # signed: -8192..+8191
         self.last_cc: tuple[int, int] | None = None
@@ -56,6 +58,10 @@ class State:
         self.organ_brightness = ORGAN_BRIGHTNESS  # 0 = dark/bassy, 1 = full bright chorus
         self.organ_air = ORGAN_AIR        # resonant "air in the metal tube" amount
         self.organ_wind = ORGAN_WIND      # how strongly the wind's gusting drives the organ
+        self.organ_level = ORGAN_LEVEL    # overall organ loudness vs the wind (lower = discreet)
+        self.organ_threshold = ORGAN_THRESHOLD  # wind level the swell must exceed to wake the organ
+        self.organ_rise_s = ORGAN_RISE_S  # how long strong wind must hold before the organ arrives
+        self.organ_fall_s = ORGAN_FALL_S  # how long the organ lingers after the wind eases
         self.trem_depth = TREM_DEPTH      # gentle periodic tremulant amplitude
         self.trem_rate = TREM_RATE        # tremulant rate (Hz)
         self.trem_pitch = TREM_PITCH      # periodic pitch vibrato (fractional)
@@ -102,6 +108,11 @@ class State:
         self.high_q = 1.0 + (HIGH_Q - 1.0) * v
         self.mid_q_max = MID_Q_MAX * v
 
+    def _shape_amp(self, norm: float) -> float:
+        """Map a normalized 0..1 volume (from MIDI velocity / CC) to amplitude via
+        the vol_curve exponent, so soft levels get most of the input travel."""
+        return max(0.0, min(1.0, norm)) ** self.vol_curve
+
     def recompute_freq(self):
         if self.note is None:
             return
@@ -114,7 +125,7 @@ class State:
         self.note = note
         self.recompute_freq()
         if self.target_amp == 0.0:
-            self.target_amp = (vel / 127.0) ** 1.8
+            self.target_amp = self._shape_amp(vel / 127.0)
 
     def note_off(self, note: int):
         if self.note == note:
@@ -136,7 +147,7 @@ class State:
                 # left hand = pan; amp stays at its note-on value.
                 self.target_position = val / 127.0
             else:
-                self.target_amp = (val / 127.0) ** 1.8
+                self.target_amp = self._shape_amp(val / 127.0)
 
     def fake_xy(self, x_norm: float, y_norm: float):
         """Trackpad fake-input: x ∈ [0,1] → freq (log). Y is amp normally;
@@ -148,4 +159,4 @@ class State:
             self.target_position = y_norm
             self.target_amp = 0.7
         else:
-            self.target_amp = y_norm ** 1.8
+            self.target_amp = self._shape_amp(y_norm)

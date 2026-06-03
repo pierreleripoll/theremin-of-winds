@@ -24,6 +24,12 @@ RELEASE_S = 0.6         # fade-out time once input stops (seconds; TUI knob)
 IDLE_TIMEOUT_S = 0.4    # no MIDI for this long -> start fading
 AMP_EPS = 1e-3          # snap presence to 0 below this (truly silent)
 
+# Volume response curve. The theremin sends a 0..127 volume value; we raise the
+# normalized value to this power before it becomes amplitude. >1 spends more of the
+# input travel in the quiet region, so small hand movements give fine control over
+# soft "breeze" levels and the loud range is reached only near the top. 1 = linear.
+VOL_CURVE = 3.0
+
 BAUD = 31250  # MrDham firmware in "true DIN MIDI" mode (Serial.begin(31250))
 
 # DMX output (Enttec DMX USB Pro, opt-in via --dmx): drive a fan on a power dimmer
@@ -75,6 +81,15 @@ ORGAN_OCTAVE = -2.0        # octave of the lowest organ note (-3 = very deep ped
 ORGAN_BRIGHTNESS = 0.35    # tilts the upper partials: 0 = dark/bassy, 1 = full bright chorus
 ORGAN_AIR = 0.45           # resonant "air in the metal tube" (pitched breath through the pipe)
 ORGAN_WIND = 0.7           # how strongly the wind's gusting drives the organ (swell/bright/pitch)
+# The organ is a background colour, not a lead voice: it should stay discreet and
+# only rise when the wind is strong AND has been strong for a while (inertia). A slow
+# envelope ("swell") follows how far the wind exceeds ORGAN_THRESHOLD, building over
+# ORGAN_RISE_S and fading over ORGAN_FALL_S, and gates the whole organ. Below the
+# threshold the organ never wakes; ORGAN_LEVEL scales its overall presence.
+ORGAN_LEVEL = 0.55         # overall organ loudness relative to the wind (lower = more discreet)
+ORGAN_THRESHOLD = 0.55     # wind intensity (0..1) the swell must exceed before the organ builds
+ORGAN_RISE_S = 6.0         # how long strong wind must hold before the organ is fully present
+ORGAN_FALL_S = 2.5         # how long the organ lingers after the wind eases
 TREM_DEPTH = 0.05          # gentle periodic tremulant on top of the swell (amplitude)
 TREM_RATE = 5.5            # tremulant rate (Hz; classic organ tremulant is 5-6 Hz)
 TREM_PITCH = 0.003         # periodic pitch vibrato, fractional (~5 cents)
