@@ -26,7 +26,7 @@ import numpy as np
 from scipy.signal import iirfilter, lfilter, lfilter_zi
 
 from config import (
-    AMP_EPS, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S, RUMBLE_CUTOFF,
+    AMP_EPS, AMP_RISE_S, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S, RUMBLE_CUTOFF,
     SMOOTH_MS, SR,
 )
 from state import State
@@ -115,6 +115,9 @@ def make_audio_callback(state: State):
 
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
     alpha_smooth = 1.0 - math.exp(-1.0 / max(tau_blocks, 1.0))
+    # slower one-pole for amplitude RISES only (anti-blast slew, see callback).
+    rise_blocks = AMP_RISE_S * SR / BLOCK
+    alpha_amp_up = 1.0 - math.exp(-1.0 / max(rise_blocks, 1.0))
 
     # auto-wind presence gate (see config.py): the firmware stops sending MIDI when
     # no hand is near, so we fade the output out once messages stop arriving.
@@ -173,16 +176,30 @@ def make_audio_callback(state: State):
             high_band_gain = state.high_band_gain
             mid_q_max = state.mid_q_max
 
-        state.cur_freq += (tf - state.cur_freq) * alpha_smooth
-        state.cur_amp += (ta - state.cur_amp) * alpha_smooth
-        state.cur_position += (tp - state.cur_position) * alpha_smooth
-
         # idle = no new MIDI messages for IDLE_TIMEOUT_S (firmware went quiet).
-        if msg_count != last_msg_count:
+        fresh_msg = msg_count != last_msg_count
+        if fresh_msg:
             last_msg_count = msg_count
             blocks_since_msg = 0
         else:
             blocks_since_msg += 1
+
+        state.cur_freq += (tf - state.cur_freq) * alpha_smooth
+        # Asymmetric amplitude slew. The volume antenna reads "hand far = loud", so
+        # pulling a hand off the instrument spikes the target toward full right before
+        # the firmware goes quiet. To keep that from becoming a wind blast as people
+        # walk away, amplitude only rises slowly (alpha_amp_up) and only while fresh
+        # MIDI keeps arriving -- a yanked hand can't reach full, and the stale loud
+        # target can't keep pushing the wind up across the idle gap (we freeze instead).
+        # Falling (hand nearing the volume antenna = quieter) stays fast so the wind
+        # can still be cut by hand.
+        if ta > state.cur_amp:
+            if fresh_msg:
+                state.cur_amp += (ta - state.cur_amp) * alpha_amp_up
+        else:
+            state.cur_amp += (ta - state.cur_amp) * alpha_smooth
+        state.cur_position += (tp - state.cur_position) * alpha_smooth
+
         if blocks_since_msg >= IDLE_TIMEOUT_S * SR / BLOCK:
             rel_tau_blocks = max(release_s, 0.05) * SR / BLOCK
             presence += (0.0 - presence) * (1.0 - math.exp(-1.0 / rel_tau_blocks))

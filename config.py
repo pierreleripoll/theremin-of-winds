@@ -24,6 +24,14 @@ RELEASE_S = 0.6         # fade-out time once input stops (seconds; TUI knob)
 IDLE_TIMEOUT_S = 0.4    # no MIDI for this long -> start fading
 AMP_EPS = 1e-3          # snap presence to 0 below this (truly silent)
 
+# Volume antenna polarity is "hand far = loud", so a hand pulled off the instrument
+# sweeps the volume toward full right before the firmware goes quiet -- which used to
+# fire a wind blast as people walked away. To stop that, amplitude RISES are slew-
+# limited to this time constant (and only chase the target while fresh MIDI keeps
+# arriving). Falls stay fast (SMOOTH_MS) so the wind can still be cut by hand. Pitch
+# is unaffected. With this, a yanked hand never reaches full before input goes quiet.
+AMP_RISE_S = 0.6        # seconds for the wind to swell toward a louder hand position
+
 # Volume response curve. The theremin sends a 0..127 volume value; we raise the
 # normalized value to this power before it becomes amplitude. >1 spends more of the
 # input travel in the quiet region, so small hand movements give fine control over
