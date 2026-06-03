@@ -32,6 +32,16 @@ AMP_EPS = 1e-3          # snap presence to 0 below this (truly silent)
 # is unaffected. With this, a yanked hand never reaches full before input goes quiet.
 AMP_RISE_S = 0.6        # seconds for the wind to swell toward a louder hand position
 
+# Wind-machine restart inertia. After sitting idle the synth spins back up slowly,
+# like a real fan overcoming inertia from a standstill -- the longer it was idle, the
+# heavier the restart. Idle accumulates while nobody plays (capped at
+# INERTIA_IDLE_FULL_S); on resume the presence spin-up time is ATTACK_S plus up to
+# INERTIA_MAX_ADD_S of extra lag, scaled by how long it sat. Once it has spun up
+# (presence reaches full) the stored inertia is spent and play is fully responsive
+# again -- you can swing between amplitude extremes freely until the next long idle.
+INERTIA_IDLE_FULL_S = 10.0   # idle this long -> maximum restart inertia
+INERTIA_MAX_ADD_S = 1.2      # extra spin-up time constant added at full inertia (s)
+
 # Rest-corner calibration. The instrument's resting posture (no hands near) sits at
 # the corner of the control space: loudest volume + lowest pitch (both antennas read
 # "hand far"), and the firmware keeps streaming it -- so without this the synth boots

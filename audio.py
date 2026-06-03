@@ -26,8 +26,9 @@ import numpy as np
 from scipy.signal import iirfilter, lfilter, lfilter_zi
 
 from config import (
-    AMP_EPS, AMP_RISE_S, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S, REST_AMP_MARGIN,
-    REST_NOTE_MARGIN, RUMBLE_CUTOFF, SMOOTH_MS, SR,
+    AMP_EPS, AMP_RISE_S, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S,
+    INERTIA_IDLE_FULL_S, INERTIA_MAX_ADD_S, REST_AMP_MARGIN, REST_NOTE_MARGIN,
+    RUMBLE_CUTOFF, SMOOTH_MS, SR,
 )
 from state import State
 
@@ -124,6 +125,7 @@ def make_audio_callback(state: State):
     presence = 0.0
     last_msg_count = 0
     blocks_since_msg = 0
+    idle_secs = 0.0  # accumulated idle time -> restart inertia (see config.py)
 
     rng = np.random.default_rng()
 
@@ -140,7 +142,7 @@ def make_audio_callback(state: State):
         nonlocal rumble_zi, bp_zi, low_zi, mid_zi, high_zi, gust_state, q_drift_state
         nonlocal bourd_root_zi, bourd_fifth_zi, bourd_third_zi
         nonlocal organ_phase, trem_phase, organ_waver_state, organ_swell
-        nonlocal presence, last_msg_count, blocks_since_msg
+        nonlocal presence, last_msg_count, blocks_since_msg, idle_secs
         if status:
             print(f"[audio] {status}", file=sys.stderr)
 
@@ -219,14 +221,23 @@ def make_audio_callback(state: State):
         state.cur_position += (tp - state.cur_position) * alpha_smooth
 
         if idle or gated_off:
+            # nobody playing: fade out, and bank idle time as restart inertia.
+            idle_secs = min(idle_secs + BLOCK / SR, INERTIA_IDLE_FULL_S)
             rel_tau_blocks = max(release_s, 0.05) * SR / BLOCK
             presence += (0.0 - presence) * (1.0 - math.exp(-1.0 / rel_tau_blocks))
             if presence < AMP_EPS:
                 presence = 0.0  # truly silent
         else:
-            # spin up from zero over attack_s so the sound doesn't pop on
-            att_tau_blocks = max(attack_s, 0.01) * SR / BLOCK
+            # spin up from zero like a wind machine overcoming inertia: the longer it
+            # sat idle, the slower the restart (ATTACK_S + up to INERTIA_MAX_ADD_S).
+            # Once spun up (presence ~ full) the banked inertia is spent, so play is
+            # fully responsive again until the next long idle.
+            inertia = min(idle_secs / INERTIA_IDLE_FULL_S, 1.0)
+            eff_attack_s = attack_s + INERTIA_MAX_ADD_S * inertia
+            att_tau_blocks = max(eff_attack_s, 0.01) * SR / BLOCK
             presence += (1.0 - presence) * (1.0 - math.exp(-1.0 / att_tau_blocks))
+            if presence >= 1.0 - AMP_EPS:
+                idle_secs = 0.0
 
         f = max(60.0, min(SR * 0.45, state.cur_freq))
         amp = max(0.0, min(1.0, state.cur_amp)) * presence
