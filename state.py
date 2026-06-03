@@ -39,6 +39,7 @@ class State:
         self.organ_mode = False  # additive pipe-organ voice (replaces the wind voice)
         self.autoplay_on = False  # demo mode: a background thread plays the synth for you
         self.autoplay_max = False  # maxautoplay: autoplay but volume pinned full, only pitch moves
+        self.muted = False  # silence the audio output while still driving sound_level (dashboard-only)
         # knobs (TUI-editable)
         self.low_fc = LOW_FC
         self.low_q = LOW_Q

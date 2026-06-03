@@ -67,6 +67,9 @@ def main():
     ap.add_argument("--maxautoplay", action="store_true",
                     help="like --autoplay but with the volume pinned full the whole time, so "
                          "only the pitch moves (toggle live with 'A')")
+    ap.add_argument("--mute", action="store_true",
+                    help="emit silence to the speakers while still driving the dashboard "
+                         "(combine with --autoplay --dashboard for a signal-only kiosk; toggle 'm')")
     ap.add_argument("--trackpad-dev",
                     help="path to /dev/input/eventN for the touchpad (default: autodetect)")
     ap.add_argument("--grab", action="store_true",
@@ -138,6 +141,7 @@ def main():
         state.spatial_mode = True
     state.autoplay_max = args.maxautoplay
     state.autoplay_on = args.autoplay or args.maxautoplay
+    state.muted = args.mute
 
     cb = make_audio_callback(state)
 

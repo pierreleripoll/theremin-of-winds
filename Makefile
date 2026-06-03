@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 
 .DEFAULT_GOAL := help
-.PHONY: help run debug no-tui list fake fake-grab autoplay maxautoplay sniff install
+.PHONY: help run debug no-tui list fake fake-grab autoplay maxautoplay dashboard-only sniff install
 
 help:  ## Show this help
 	@awk 'BEGIN{FS=":.*?## "} /^[a-zA-Z_-]+:.*?## /{printf "  %-12s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -29,6 +29,9 @@ autoplay:  ## Demo mode: synth plays itself, no theremin
 
 maxautoplay: ## Demo mode at full volume, only pitch moves
 	$(PY) theremin_wind.py --dashboard --maxautoplay
+
+dashboard-only: ## Autoplay the dashboard with no audio (silent kiosk signal)
+	$(PY) theremin_wind.py --dashboard --autoplay --mute
 
 sniff:     ## Run serial baud-rate diagnostic
 	$(PY) sniff_serial.py

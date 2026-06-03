@@ -161,6 +161,7 @@ def make_audio_callback(state: State):
             tone_level = state.tone_level
             bourdon_q = state.bourdon_q
             spatial_mode = state.spatial_mode
+            muted = state.muted
             tp = state.target_position
             pan_floor = state.pan_floor
             low_fc, low_q = state.low_fc, state.low_q
@@ -343,6 +344,13 @@ def make_audio_callback(state: State):
             mix = mix + (stack * ORGAN_GAIN + air * AIR_BOOST * organ_air) * organ_amp_eff
 
         mix32 = np.tanh(mix * drive).astype(np.float32)
+
+        # Dashboard-only / mute: sound_level + cur_freq are already written above, so
+        # the kiosk still animates; just emit silence to the speakers.
+        if muted:
+            outdata[:] = 0.0
+            state.cur_tilt = (math.log(max(60.0, f)) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
+            return
 
         n_ch = outdata.shape[1]
         if spatial_mode and n_ch >= 2:
