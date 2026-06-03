@@ -30,9 +30,11 @@ uv pip install --python .venv/bin/python mido python-rtmidi sounddevice numpy sc
 .venv/bin/python theremin_wind.py --no-tui   # play without the TUI
 .venv/bin/python theremin_wind.py --list     # show serial + audio devices
 .venv/bin/python theremin_wind.py --dmx      # also drive a fan over DMX (see below)
+.venv/bin/python theremin_wind.py --autoplay # demo mode: plays itself, no theremin needed
 ```
 
-Press `q` to quit.
+Press `q` to quit. In the TUI, `a` toggles autoplay (the synth plays itself with slow
+random wind gestures) for hands-off demos.
 
 ## Blowing a real fan (DMX)
 

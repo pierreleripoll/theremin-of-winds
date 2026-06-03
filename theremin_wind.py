@@ -28,6 +28,7 @@ import time
 import sounddevice as sd
 
 from audio import make_audio_callback
+from autoplay import autoplay_loop
 from config import BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, SR
 from dmx import dmx_loop, find_dmx_port
 from midi import find_serial_port, list_serial_ports, serial_loop
@@ -58,6 +59,9 @@ def main():
                          "(toggle live with 's'); wind pitch becomes a fixed knob")
     ap.add_argument("--fake", action="store_true",
                     help="trackpad fake mode (no theremin needed): touchpad X = freq, Y = volume")
+    ap.add_argument("--autoplay", action="store_true",
+                    help="demo mode (no theremin needed): a background thread plays the synth "
+                         "for you with slow random wind gestures (toggle live with 'a')")
     ap.add_argument("--trackpad-dev",
                     help="path to /dev/input/eventN for the touchpad (default: autodetect)")
     ap.add_argument("--grab", action="store_true",
@@ -86,7 +90,9 @@ def main():
                 print(f"  [{i}] {d['name']}  ({d['hostapi']})")
         return
 
-    if args.fake:
+    if args.autoplay:
+        port = "autoplay (simulated, no hardware)"
+    elif args.fake:
         try:
             from trackpad import open_touchpad, trackpad_loop
             tpad = open_touchpad(args.trackpad_dev)
@@ -114,10 +120,15 @@ def main():
     state.use_gust = not args.no_gust
     state.organ_mode = args.organ
     state.spatial_mode = args.spatial
+    state.autoplay_on = args.autoplay
 
     cb = make_audio_callback(state)
 
-    if args.fake:
+    # Input source. --autoplay needs no hardware: the autoplay thread (started below,
+    # always running but gated by state.autoplay_on) is the only input.
+    if args.autoplay:
+        input_thread = None
+    elif args.fake:
         input_thread = threading.Thread(
             target=trackpad_loop, args=(state, tpad, args.grab), daemon=True
         )
@@ -125,7 +136,16 @@ def main():
         input_thread = threading.Thread(
             target=serial_loop, args=(state, port, args.baud, args.debug), daemon=True
         )
-    input_thread.start()
+    if input_thread is not None:
+        input_thread.start()
+
+    # Autoplay thread is always started; it only drives the synth while
+    # state.autoplay_on is set, so the TUI can toggle demo mode live with 'a'.
+    autoplay_stop = threading.Event()
+    autoplay_thread = threading.Thread(
+        target=autoplay_loop, args=(state, autoplay_stop), daemon=True
+    )
+    autoplay_thread.start()
 
     dmx_stop = threading.Event()
     dmx_thread = None
@@ -188,6 +208,7 @@ def main():
             except KeyboardInterrupt:
                 pass
 
+    autoplay_stop.set()
     # blackout the fan and let the DMX thread close its port before we exit.
     dmx_stop.set()
     if dmx_thread is not None:

@@ -1,7 +1,7 @@
 PY := .venv/bin/python
 
 .DEFAULT_GOAL := help
-.PHONY: help run debug no-tui list fake fake-grab sniff install
+.PHONY: help run debug no-tui list fake fake-grab autoplay sniff install
 
 help:  ## Show this help
 	@awk 'BEGIN{FS=":.*?## "} /^[a-zA-Z_-]+:.*?## /{printf "  %-12s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -23,6 +23,9 @@ fake:      ## Drive synth from a touchpad
 
 fake-grab: ## Touchpad mode with exclusive grab
 	$(PY) theremin_wind.py --fake --grab
+
+autoplay:  ## Demo mode: synth plays itself, no theremin
+	$(PY) theremin_wind.py --autoplay
 
 sniff:     ## Run serial baud-rate diagnostic
 	$(PY) sniff_serial.py

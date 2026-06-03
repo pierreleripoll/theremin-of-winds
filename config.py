@@ -32,6 +32,20 @@ VOL_CURVE = 3.0
 
 BAUD = 31250  # MrDham firmware in "true DIN MIDI" mode (Serial.begin(31250))
 
+# Auto-play (demo) mode (--autoplay / 'a'): a background thread wanders the pitch
+# and volume the way a hand would on the instrument, so the synth plays itself with
+# no theremin. It eases between random "gesture" waypoints with occasional lulls, and
+# drives them through State.fake_xy (which bumps msg_count, so the presence gate stays
+# open). Meant for the exhibition: simulate someone playing without a person there.
+AUTOPLAY_RATE_HZ = 30.0       # how often the simulated hand position updates
+AUTOPLAY_MIN_GESTURE_S = 1.2  # shortest glide from one waypoint to the next
+AUTOPLAY_MAX_GESTURE_S = 4.5  # longest glide (slow, sustained wind)
+AUTOPLAY_PITCH_STEP = 0.45    # max change in pitch position (0..1) per gesture
+AUTOPLAY_AMP_LO = 0.45        # quietest "playing" volume (pre vol-curve, 0..1)
+AUTOPLAY_AMP_HI = 1.0         # loudest gust
+AUTOPLAY_REST_PROB = 0.2      # chance a gesture is a near-silent lull instead
+AUTOPLAY_REST_AMP = 0.08      # volume during a lull (eases the wind down, not fully out)
+
 # DMX output (Enttec DMX USB Pro, opt-in via --dmx): drive a fan on a power dimmer
 # while the synth makes sound. The dimmer is addressed at channel 50.
 DMX_BAUD = 57600        # FTDI side; the Pro generates DMX timing itself, so this is nominal

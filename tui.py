@@ -103,6 +103,7 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             u5, tm = state.use_fifth, state.third_mode
             org = state.organ_mode
             usp = state.spatial_mode
+            apl = state.autoplay_on
             dmxa, dmxon = state.dmx_available, state.dmx_on
             cp = state.cur_position
             knob_vals = [getattr(state, k.attr) for k in KNOB_DEFS]
@@ -126,7 +127,8 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                 f"[{'x' if u5 else ' '}] fifth (5)   "
                 f"third: {THIRD_LABELS[tm]} (t)   "
                 f"[{'x' if org else ' '}] organ (o)   "
-                f"[{'x' if usp else ' '}] spatial (s)")
+                f"[{'x' if usp else ' '}] spatial (s)   "
+                f"[{'x' if apl else ' '}] autoplay (a)")
         if dmxa:
             feat += f"   [{'x' if dmxon else ' '}] dmx fan (d)"
         _put(stdscr, 3, 0, feat, max_x)
@@ -156,7 +158,7 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         cc_str = f"last_cc={cc[0]}={cc[1]}" if cc else "last_cc=--"
         _put(stdscr, frow + 2, 2,
              f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  {cc_str}", max_x)
-        toggles = "3/g/5/t/o/s/d" if dmxa else "3/g/5/t/o/s"
+        toggles = "3/g/5/t/o/s/a/d" if dmxa else "3/g/5/t/o/s/a"
         _put(stdscr, frow + 4, 0,
              f"↑↓ select   ←→ adjust   {toggles} toggle   q quit", max_x)
         stdscr.refresh()
@@ -185,6 +187,8 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                 state.spatial_mode = not state.spatial_mode
                 # re-derive freq/position from current MIDI state under the new mode
                 state.recompute_freq()
+            elif key == ord("a"):
+                state.autoplay_on = not state.autoplay_on
             elif key == ord("d") and state.dmx_available:
                 state.dmx_on = not state.dmx_on
             elif key in (curses.KEY_UP, ord("k")):
