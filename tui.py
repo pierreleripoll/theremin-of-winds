@@ -119,6 +119,8 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             ca = state.cur_amp
             cc = state.last_cc
             tilt = state.cur_tilt
+            rest_amp, rest_note = state.rest_amp, state.rest_note
+            calibrating = state.calibrating
 
         max_y, max_x = stdscr.getmaxyx()
         n = len(KNOB_DEFS)
@@ -164,14 +166,21 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
              f"bend={bend:>+6}  freq={cf:>6.1f} Hz", max_x)
         spatial_str = f"  pos={cp:.2f}" if usp else ""
         cc_str = f"last_cc={cc[0]}={cc[1]}" if cc else "last_cc=--"
+        if calibrating:
+            rest_str = "rest=CALIBRATING"
+        elif rest_amp is None:
+            rest_str = "rest=--"
+        else:
+            rn = f"{rest_note:.0f}" if rest_note is not None else "--"
+            rest_str = f"rest={rest_amp:.2f}/{rn}"
         _put(stdscr, frow + 2, 2,
-             f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  {cc_str}", max_x)
+             f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  {cc_str}  {rest_str}", max_x)
         if status_frames > 0:
             _put(stdscr, frow + 3, 0, status, max_x, curses.A_BOLD)
             status_frames -= 1
         toggles = "3/g/5/t/o/s/a/d" if dmxa else "3/g/5/t/o/s/a"
         _put(stdscr, frow + 4, 0,
-             f"↑↓ select   ←→ adjust   {toggles} toggle   w save   q quit", max_x)
+             f"↑↓ select   ←→ adjust   {toggles} toggle   c calib   w save   q quit", max_x)
         stdscr.refresh()
 
         try:
@@ -186,6 +195,11 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             # save_preset takes state.lock itself, so do it outside the lock block.
             presets.save_preset(state)
             status, status_frames = f"saved {presets.PRESET_PATH.name}", 20
+            continue
+        if key in (ord("c"), ord("C")):  # recalibrate the rest point (stand back!)
+            with state.lock:
+                state.calibrate_request = True
+            status, status_frames = "calibrating rest... (stand back)", 20
             continue
 
         with state.lock:

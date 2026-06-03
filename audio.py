@@ -26,8 +26,8 @@ import numpy as np
 from scipy.signal import iirfilter, lfilter, lfilter_zi
 
 from config import (
-    AMP_EPS, AMP_RISE_S, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S, RUMBLE_CUTOFF,
-    SMOOTH_MS, SR,
+    AMP_EPS, AMP_RISE_S, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S, REST_AMP_MARGIN,
+    REST_NOTE_MARGIN, RUMBLE_CUTOFF, SMOOTH_MS, SR,
 )
 from state import State
 
@@ -149,6 +149,9 @@ def make_audio_callback(state: State):
             attack_s = state.attack_s
             release_s = state.release_s
             msg_count = state.msg_count
+            note = state.note
+            rest_amp, rest_note = state.rest_amp, state.rest_note
+            calibrating = state.calibrating
             use_3band = state.use_3band
             use_gust = state.use_gust
             use_fifth = state.use_fifth
@@ -183,24 +186,39 @@ def make_audio_callback(state: State):
             blocks_since_msg = 0
         else:
             blocks_since_msg += 1
+        idle = blocks_since_msg >= IDLE_TIMEOUT_S * SR / BLOCK
+
+        # Rest-corner gate: at rest (no hands) the instrument streams max volume +
+        # lowest note -- the corner of the control space. Once calibrated, a reading
+        # within a margin of that corner means nobody is playing, so we silence the
+        # wind the same way the idle timeout does (the firmware doesn't go quiet at
+        # rest, so the idle gate alone never catches this). `calibrating` holds it
+        # silent while the rest point is sampled, including the first seconds after
+        # launch -- which is what stops the synth blasting on boot.
+        resting = (
+            rest_amp is not None
+            and ta >= rest_amp - REST_AMP_MARGIN
+            and (rest_note is None or note is None or note <= rest_note + REST_NOTE_MARGIN)
+        )
+        gated_off = resting or calibrating
 
         state.cur_freq += (tf - state.cur_freq) * alpha_smooth
         # Asymmetric amplitude slew. The volume antenna reads "hand far = loud", so
-        # pulling a hand off the instrument spikes the target toward full right before
-        # the firmware goes quiet. To keep that from becoming a wind blast as people
-        # walk away, amplitude only rises slowly (alpha_amp_up) and only while fresh
-        # MIDI keeps arriving -- a yanked hand can't reach full, and the stale loud
-        # target can't keep pushing the wind up across the idle gap (we freeze instead).
+        # pulling a hand off the instrument (or just standing away) spikes the target
+        # toward full. Amplitude only rises slowly (alpha_amp_up) and only while fresh
+        # MIDI keeps arriving AND we aren't gated off -- so a yanked hand can't reach
+        # full, a stale loud target can't keep pushing the wind up across an input gap,
+        # and the resting corner never charges cur_amp toward max behind the gate.
         # Falling (hand nearing the volume antenna = quieter) stays fast so the wind
         # can still be cut by hand.
         if ta > state.cur_amp:
-            if fresh_msg:
+            if fresh_msg and not gated_off:
                 state.cur_amp += (ta - state.cur_amp) * alpha_amp_up
         else:
             state.cur_amp += (ta - state.cur_amp) * alpha_smooth
         state.cur_position += (tp - state.cur_position) * alpha_smooth
 
-        if blocks_since_msg >= IDLE_TIMEOUT_S * SR / BLOCK:
+        if idle or gated_off:
             rel_tau_blocks = max(release_s, 0.05) * SR / BLOCK
             presence += (0.0 - presence) * (1.0 - math.exp(-1.0 / rel_tau_blocks))
             if presence < AMP_EPS:

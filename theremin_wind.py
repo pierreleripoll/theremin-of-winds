@@ -160,6 +160,17 @@ def main():
     if input_thread is not None:
         input_thread.start()
 
+    # Rest-corner calibration only makes sense with a real theremin streaming MIDI
+    # notes: --fake / --autoplay drive pitch through fake_xy (no note), so there is
+    # no resting corner to sample. Started here, it auto-calibrates a couple seconds
+    # after launch and holds the synth silent until it knows the rest point.
+    calib_stop = threading.Event()
+    if input_thread is not None and not args.fake:
+        from calibrate import calibrate_loop
+        threading.Thread(
+            target=calibrate_loop, args=(state, calib_stop), daemon=True
+        ).start()
+
     # Autoplay thread is always started; it only drives the synth while
     # state.autoplay_on is set, so the TUI can toggle demo mode live with 'a'.
     autoplay_stop = threading.Event()
@@ -240,6 +251,7 @@ def main():
 
     autoplay_stop.set()
     push_stop.set()
+    calib_stop.set()
     # blackout the fan and let the DMX thread close its port before we exit.
     dmx_stop.set()
     if dmx_thread is not None:

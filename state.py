@@ -31,6 +31,13 @@ class State:
         self.pitch_bend = 0  # signed: -8192..+8191
         self.last_cc: tuple[int, int] | None = None
         self.msg_count = 0  # bumped per MIDI message; the audio gate watches it for idle
+        # rest-corner calibration (calibrate.py): the sampled resting reading (loudest
+        # volume + lowest note = no hands). None until calibrated; the audio gate
+        # silences the wind while the live reading sits within a margin of this corner.
+        self.rest_amp: float | None = None
+        self.rest_note: float | None = None
+        self.calibrate_request = False  # TUI 'c' -> resample the rest point
+        self.calibrating = False        # True while sampling (holds the synth silent)
         # feature toggles (TUI-editable)
         self.use_3band = True
         self.use_gust = True

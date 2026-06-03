@@ -32,6 +32,20 @@ AMP_EPS = 1e-3          # snap presence to 0 below this (truly silent)
 # is unaffected. With this, a yanked hand never reaches full before input goes quiet.
 AMP_RISE_S = 0.6        # seconds for the wind to swell toward a louder hand position
 
+# Rest-corner calibration. The instrument's resting posture (no hands near) sits at
+# the corner of the control space: loudest volume + lowest pitch (both antennas read
+# "hand far"), and the firmware keeps streaming it -- so without this the synth boots
+# into a full-blast low wind. calibrate.py samples that corner (automatically
+# ~CALIB_STARTUP_DELAY_S after launch -- step back while it does -- and on the TUI 'c'
+# key); the audio gate then treats any reading within these margins of the corner as
+# "nobody playing" and stays silent. To make sound the player must leave the corner:
+# raise the pitch OR lower the volume. Only the extreme "lowest note at full blast"
+# gesture is sacrificed (not a real playing gesture).
+CALIB_STARTUP_DELAY_S = 2.0   # silence + wait this long after launch, then auto-sample
+CALIB_SAMPLE_S = 1.5          # how long to watch the resting reading while sampling
+REST_AMP_MARGIN = 0.07        # volume within this of the resting max still counts as rest
+REST_NOTE_MARGIN = 3.0        # note within this many semitones of the resting low = rest
+
 # Volume response curve. The theremin sends a 0..127 volume value; we raise the
 # normalized value to this power before it becomes amplitude. >1 spends more of the
 # input travel in the quiet region, so small hand movements give fine control over
