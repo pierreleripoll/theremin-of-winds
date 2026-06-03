@@ -154,6 +154,10 @@ class State:
         in spatial mode Y → pan position and amp is held constant while touching."""
         x_norm = max(0.0, min(1.0, x_norm))
         y_norm = max(0.0, min(1.0, y_norm))
+        # A finger on the trackpad is "presence" the same way incoming MIDI is: bump
+        # msg_count so the auto-wind idle gate (audio.py) keeps the sound alive while
+        # touching, and lets it fade once the finger lifts (trackpad sets amp to 0).
+        self.msg_count += 1
         self.target_freq = FREQ_LO * (FREQ_HI / FREQ_LO) ** x_norm
         if self.spatial_mode:
             self.target_position = y_norm
