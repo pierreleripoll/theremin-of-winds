@@ -33,6 +33,7 @@ from config import BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, SR
 from dmx import dmx_loop, find_dmx_port
 from midi import find_serial_port, list_serial_ports, serial_loop
 from state import State
+from theremin_push import push_loop
 
 
 def main():
@@ -78,6 +79,10 @@ def main():
                          "dim = fan speed tracks wind intensity (dimmer channel in gradation mode)")
     ap.add_argument("--dmx-min", type=int, default=DMX_MIN_LEVEL,
                     help=f"dim mode: lowest level that still spins the fan (default {DMX_MIN_LEVEL})")
+    ap.add_argument("--dashboard", action="store_true",
+                    help="push live readings to the kiosk dashboard API")
+    ap.add_argument("--dashboard-url", default="http://localhost:8000/theremin-live",
+                    help="dashboard ingest endpoint (default: local FastAPI bridge)")
     args = ap.parse_args()
 
     if args.list:
@@ -164,6 +169,15 @@ def main():
         )
         dmx_thread.start()
 
+    push_stop = threading.Event()
+    if args.dashboard:
+        threading.Thread(
+            target=push_loop,
+            args=(state, args.dashboard_url, push_stop),
+            kwargs={"debug": args.debug},
+            daemon=True,
+        ).start()
+
     use_tui = not (args.no_tui or args.debug)
 
     with sd.OutputStream(
@@ -209,6 +223,7 @@ def main():
                 pass
 
     autoplay_stop.set()
+    push_stop.set()
     # blackout the fan and let the DMX thread close its port before we exit.
     dmx_stop.set()
     if dmx_thread is not None:

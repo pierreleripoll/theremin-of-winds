@@ -7,25 +7,25 @@ help:  ## Show this help
 	@awk 'BEGIN{FS=":.*?## "} /^[a-zA-Z_-]+:.*?## /{printf "  %-12s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 
 run:       ## Launch synth with curses TUI
-	$(PY) theremin_wind.py
+	$(PY) theremin_wind.py --dashboard
 
 debug:     ## Dump MIDI bytes (no TUI)
-	$(PY) theremin_wind.py --debug
+	$(PY) theremin_wind.py --dashboard --debug
 
 no-tui:    ## Play without TUI
-	$(PY) theremin_wind.py --no-tui
+	$(PY) theremin_wind.py --dashboard --no-tui
 
 list:      ## List serial + audio devices
 	$(PY) theremin_wind.py --list
 
 fake:      ## Drive synth from a touchpad
-	$(PY) theremin_wind.py --fake
+	$(PY) theremin_wind.py --dashboard --fake
 
 fake-grab: ## Touchpad mode with exclusive grab
-	$(PY) theremin_wind.py --fake --grab
+	$(PY) theremin_wind.py --dashboard --fake --grab
 
 autoplay:  ## Demo mode: synth plays itself, no theremin
-	$(PY) theremin_wind.py --autoplay
+	$(PY) theremin_wind.py --dashboard --autoplay
 
 sniff:     ## Run serial baud-rate diagnostic
 	$(PY) sniff_serial.py
