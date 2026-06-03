@@ -64,6 +64,9 @@ def main():
     ap.add_argument("--autoplay", action="store_true",
                     help="demo mode (no theremin needed): a background thread plays the synth "
                          "for you with slow random wind gestures (toggle live with 'a')")
+    ap.add_argument("--maxautoplay", action="store_true",
+                    help="like --autoplay but with the volume pinned full the whole time, so "
+                         "only the pitch moves (toggle live with 'A')")
     ap.add_argument("--trackpad-dev",
                     help="path to /dev/input/eventN for the touchpad (default: autodetect)")
     ap.add_argument("--grab", action="store_true",
@@ -96,7 +99,7 @@ def main():
                 print(f"  [{i}] {d['name']}  ({d['hostapi']})")
         return
 
-    if args.autoplay:
+    if args.autoplay or args.maxautoplay:
         port = "autoplay (simulated, no hardware)"
     elif args.fake:
         try:
@@ -133,13 +136,14 @@ def main():
         state.organ_mode = True
     if args.spatial:
         state.spatial_mode = True
-    state.autoplay_on = args.autoplay
+    state.autoplay_max = args.maxautoplay
+    state.autoplay_on = args.autoplay or args.maxautoplay
 
     cb = make_audio_callback(state)
 
     # Input source. --autoplay needs no hardware: the autoplay thread (started below,
     # always running but gated by state.autoplay_on) is the only input.
-    if args.autoplay:
+    if args.autoplay or args.maxautoplay:
         input_thread = None
     elif args.fake:
         input_thread = threading.Thread(

@@ -5,6 +5,9 @@ instrument -- easing between random "gesture" waypoints with occasional lulls --
 and drives them through State.fake_xy, which also bumps msg_count so the auto-wind
 presence gate (audio.py) keeps the sound alive. Gated by State.autoplay_on so the
 TUI can toggle it live ('a'); started on with --autoplay.
+
+With State.autoplay_max (maxautoplay / 'A' / --maxautoplay) the volume is pinned
+full and only the pitch gesture moves -- a constant gust that just changes note.
 """
 import random
 
@@ -50,7 +53,7 @@ def autoplay_loop(state: State, stop_event, rng: random.Random | None = None):
         glide = min(1.0, glide + step)
         e = glide * glide * (3.0 - 2.0 * glide)  # smoothstep ease in/out
         cx = x0 + (tx - x0) * e
-        cy = y0 + (ty - y0) * e
+        cy = 1.0 if state.autoplay_max else y0 + (ty - y0) * e
         with state.lock:
             state.fake_xy(cx, cy)
         stop_event.wait(dt)

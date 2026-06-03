@@ -108,6 +108,7 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             org = state.organ_mode
             usp = state.spatial_mode
             apl = state.autoplay_on
+            aplm = state.autoplay_max
             dmxa, dmxon = state.dmx_available, state.dmx_on
             cp = state.cur_position
             knob_vals = [getattr(state, k.attr) for k in KNOB_DEFS]
@@ -132,7 +133,8 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                 f"third: {THIRD_LABELS[tm]} (t)   "
                 f"[{'x' if org else ' '}] organ (o)   "
                 f"[{'x' if usp else ' '}] spatial (s)   "
-                f"[{'x' if apl else ' '}] autoplay (a)")
+                f"[{'x' if apl else ' '}] autoplay (a)   "
+                f"[{'x' if aplm else ' '}] max-vol (A)")
         if dmxa:
             feat += f"   [{'x' if dmxon else ' '}] dmx fan (d)"
         _put(stdscr, 3, 0, feat, max_x)
@@ -201,6 +203,12 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                 state.recompute_freq()
             elif key == ord("a"):
                 state.autoplay_on = not state.autoplay_on
+                if not state.autoplay_on:
+                    state.autoplay_max = False
+            elif key == ord("A"):
+                state.autoplay_max = not state.autoplay_max
+                if state.autoplay_max:
+                    state.autoplay_on = True
             elif key == ord("d") and state.dmx_available:
                 state.dmx_on = not state.dmx_on
             elif key in (curses.KEY_UP, ord("k")):

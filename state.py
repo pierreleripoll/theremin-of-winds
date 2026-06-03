@@ -38,6 +38,7 @@ class State:
         self.third_mode = 0  # 0=off, 1=minor (6:5), 2=major (5:4)
         self.organ_mode = False  # additive pipe-organ voice (replaces the wind voice)
         self.autoplay_on = False  # demo mode: a background thread plays the synth for you
+        self.autoplay_max = False  # maxautoplay: autoplay but volume pinned full, only pitch moves
         # knobs (TUI-editable)
         self.low_fc = LOW_FC
         self.low_q = LOW_Q
