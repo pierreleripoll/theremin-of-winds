@@ -7,28 +7,28 @@ help:  ## Show this help
 	@awk 'BEGIN{FS=":.*?## "} /^[a-zA-Z_-]+:.*?## /{printf "  %-12s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 
 run:       ## Launch synth with curses TUI
-	$(PY) theremin_wind.py --dashboard
+	$(PY) theremin_wind.py --dashboard --dmx
 
 debug:     ## Dump MIDI bytes (no TUI)
-	$(PY) theremin_wind.py --dashboard --debug
+	$(PY) theremin_wind.py --dashboard --dmx --debug
 
 no-tui:    ## Play without TUI
-	$(PY) theremin_wind.py --dashboard --no-tui
+	$(PY) theremin_wind.py --dashboard --dmx --no-tui
 
 list:      ## List serial + audio devices
 	$(PY) theremin_wind.py --list
 
 fake:      ## Drive synth from a touchpad
-	$(PY) theremin_wind.py --dashboard --fake
+	$(PY) theremin_wind.py --dashboard --dmx --fake
 
 fake-grab: ## Touchpad mode with exclusive grab
-	$(PY) theremin_wind.py --dashboard --fake --grab
+	$(PY) theremin_wind.py --dashboard --dmx --fake --grab
 
 autoplay:  ## Demo mode: synth plays itself, no theremin
-	$(PY) theremin_wind.py --dashboard --autoplay
+	$(PY) theremin_wind.py --dashboard --dmx --autoplay
 
 maxautoplay: ## Demo mode at full volume, only pitch moves
-	$(PY) theremin_wind.py --dashboard --maxautoplay
+	$(PY) theremin_wind.py --dashboard --dmx --maxautoplay
 
 dashboard-only: ## Autoplay the dashboard with no audio (silent kiosk signal)
 	$(PY) theremin_wind.py --dashboard --autoplay --mute

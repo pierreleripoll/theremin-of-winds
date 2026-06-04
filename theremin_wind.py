@@ -29,7 +29,7 @@ import sounddevice as sd
 
 from audio import make_audio_callback
 from autoplay import autoplay_loop
-from config import BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, SR
+from config import BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, DMX_STAGES, SR
 from dmx import dmx_loop, find_dmx_port
 from midi import find_serial_port, list_serial_ports, serial_loop
 from presets import load_preset
@@ -80,7 +80,7 @@ def main():
     ap.add_argument("--dmx-port",
                     help="Enttec serial port (default: autodetect the DMX USB Pro)")
     ap.add_argument("--dmx-channel", type=int, default=DMX_CHANNEL,
-                    help=f"DMX channel driving the fan/dimmer (default {DMX_CHANNEL})")
+                    help=f"dimmer base address; fan outlets are offsets from it (default {DMX_CHANNEL})")
     ap.add_argument("--dmx-mode", choices=("switch", "dim"), default="switch",
                     help="switch = full-on while there's sound (dimmer channel in switch mode); "
                          "dim = fan speed tracks wind intensity (dimmer channel in gradation mode)")
@@ -185,16 +185,22 @@ def main():
         try:
             dmx_port = find_dmx_port(args.dmx_port)
         except RuntimeError as e:
-            sys.exit(str(e))
-        state.dmx_available = True
-        state.dmx_on = True
-        dmx_thread = threading.Thread(
-            target=dmx_loop,
-            args=(state, dmx_port, args.dmx_channel, DMX_ON_LEVEL, dmx_stop, args.debug),
-            kwargs={"proportional": args.dmx_mode == "dim", "min_level": args.dmx_min},
-            daemon=True,
-        )
-        dmx_thread.start()
+            # Don't take the whole synth down because a DMX cable popped out --
+            # for the exhibition the wind must keep playing. Warn and run without
+            # the fan; the TUI just won't show the 'dmx fan' toggle.
+            print(f"[dmx] {e} -- continuing without DMX fan", file=sys.stderr)
+            dmx_port = None
+        if dmx_port is not None:
+            state.dmx_available = True
+            state.dmx_on = True
+            dmx_thread = threading.Thread(
+                target=dmx_loop,
+                args=(state, dmx_port, args.dmx_channel, DMX_ON_LEVEL, dmx_stop, args.debug),
+                kwargs={"proportional": args.dmx_mode == "dim", "min_level": args.dmx_min,
+                        "stages": DMX_STAGES},
+                daemon=True,
+            )
+            dmx_thread.start()
 
     push_stop = threading.Event()
     if args.dashboard:

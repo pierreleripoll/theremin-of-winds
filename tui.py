@@ -169,18 +169,20 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         _put(stdscr, 0, 0, "─── theremin wind ──────────────────────────────", max_x)
         _put(stdscr, 1, 0,
              f"input: trackpad fake — {port}" if fake else f"midi: {port} @ {baud}", max_x)
-        feat = (f"features:  [{'x' if u3 else ' '}] 3-band (3)   "
-                f"[{'x' if ug else ' '}] gust (g)   "
-                f"[{'x' if u5 else ' '}] fifth (5)   "
-                f"third: {THIRD_LABELS[tm]} (t)   "
-                f"[{'x' if org else ' '}] organ (o)   "
-                f"[{'x' if usp else ' '}] spatial (s)   "
-                f"[{'x' if apl else ' '}] autoplay (a)   "
-                f"[{'x' if aplm else ' '}] max-vol (A)   "
-                f"[{'x' if mut else ' '}] mute (m)")
+        # Two compact lines so every toggle stays visible on a narrow (80-col)
+        # terminal -- the old single line ran ~177 chars and clipped the last
+        # toggles (incl. dmx fan) off the right edge.
+        def tog(on: bool, label: str, key: str) -> str:
+            return f"[{'x' if on else ' '}]{label}({key})"
+        line1 = "  ".join((
+            tog(u3, "3band", "3"), tog(ug, "gust", "g"), tog(u5, "fifth", "5"),
+            f"third:{THIRD_LABELS[tm]}(t)", tog(org, "organ", "o"), tog(usp, "spatial", "s"),
+        ))
+        line2 = [tog(apl, "autoplay", "a"), tog(aplm, "max-vol", "A"), tog(mut, "mute", "m")]
         if dmxa:
-            feat += f"   [{'x' if dmxon else ' '}] dmx fan (d)"
-        _put(stdscr, 3, 0, feat, max_x)
+            line2.append(tog(dmxon, "dmx fan", "d"))
+        _put(stdscr, 3, 0, line1, max_x)
+        _put(stdscr, 4, 0, "  ".join(line2), max_x)
 
         hdr = "knobs:  (» = macro)"
         if top > 0:
