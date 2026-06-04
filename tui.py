@@ -91,6 +91,18 @@ MACRO_ATTRS = {k.attr for k in MACROS}
 
 THIRD_LABELS = {0: "off", 1: "min", 2: "maj"}
 
+# Solo: isolate one audio layer to learn what each knob does. (state key, label, key).
+# Several can be on at once; none on = everything plays. Band solos (grave/medium/aigu)
+# only separate in 3-band mode; in single-band mode the whole wind sits under "grave".
+SOLO_DEFS = [
+    ("low",     "grave",   "z"),
+    ("mid",     "medium",  "x"),
+    ("high",    "aigu",    "v"),
+    ("bourdon", "bourdon", "b"),
+    ("organ",   "orgue",   "n"),
+]
+SOLO_KEYS = {ord(key): name for name, _lbl, key in SOLO_DEFS}
+
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
@@ -143,6 +155,7 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             apl = state.autoplay_on
             aplm = state.autoplay_max
             mut = state.muted
+            solo = set(state.solo)
             dmxa, dmxon = state.dmx_available, state.dmx_on
             cp = state.cur_position
             knob_vals = [getattr(state, k.attr) for k in KNOB_DEFS]
@@ -181,8 +194,13 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         line2 = [tog(apl, "autoplay", "a"), tog(aplm, "max-vol", "A"), tog(mut, "mute", "m")]
         if dmxa:
             line2.append(tog(dmxon, "dmx fan", "d"))
-        _put(stdscr, 3, 0, line1, max_x)
-        _put(stdscr, 4, 0, "  ".join(line2), max_x)
+        solo_line = "solo: " + "  ".join(
+            tog(name in solo, lbl, key) for name, lbl, key in SOLO_DEFS)
+        if not solo:
+            solo_line += "   (rien = tout)"
+        _put(stdscr, 2, 0, line1, max_x)
+        _put(stdscr, 3, 0, "  ".join(line2), max_x)
+        _put(stdscr, 4, 0, solo_line, max_x)
 
         hdr = "knobs:  (» = macro)"
         if top > 0:
@@ -230,7 +248,8 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
             status_frames -= 1
         toggles = "3/g/5/t/o/s/a/d" if dmxa else "3/g/5/t/o/s/a"
         _put(stdscr, frow + 6, 0,
-             f"↑↓ select   ←→ adjust   {toggles} toggle   c calib   w save   q quit", max_x)
+             f"↑↓ sel  ←→ adj  {toggles} tog  z/x/v/b/n solo  c calib  w save  q quit",
+             max_x)
         stdscr.refresh()
 
         try:
@@ -277,6 +296,9 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
                     state.autoplay_on = True
             elif key == ord("m"):
                 state.muted = not state.muted
+            elif key in SOLO_KEYS:
+                name = SOLO_KEYS[key]
+                state.solo.discard(name) if name in state.solo else state.solo.add(name)
             elif key == ord("d") and state.dmx_available:
                 state.dmx_on = not state.dmx_on
             elif key in (curses.KEY_UP, ord("k")):

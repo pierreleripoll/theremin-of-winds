@@ -170,6 +170,7 @@ def make_audio_callback(state: State):
             bourdon_q = state.bourdon_q
             spatial_mode = state.spatial_mode
             muted = state.muted
+            solo = set(state.solo)
             tp = state.target_position
             pan_floor = state.pan_floor
             low_fc, low_q = state.low_fc, state.low_q
@@ -267,6 +268,10 @@ def make_audio_callback(state: State):
         else:
             q_mod = 1.0
 
+        # Each audio layer is accumulated into `comp` so the TUI's solo flags can
+        # isolate any subset of them (see the solo mix near the tanh below).
+        comp: dict[str, np.ndarray] = {}
+
         if use_3band:
             tilt = (math.log(f) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
             tilt = max(0.0, min(1.0, tilt))
@@ -287,13 +292,17 @@ def make_audio_callback(state: State):
             g_mid = 0.7
             g_high = (tilt ** 3) * high_band_gain
 
-            mix = (low * g_low * 4.0 + mid * g_mid * 1.5 + high * g_high * 1.5) * amp_eff
+            comp["low"] = low * g_low * 4.0 * amp_eff
+            comp["mid"] = mid * g_mid * 1.5 * amp_eff
+            comp["high"] = high * g_high * 1.5 * amp_eff
         else:
             Q = (1.2 + (mid_q_max + 1.0) * (amp ** 0.6)) * q_mod
             b, a = build_biquad_bandpass(f, Q, SR)
             bp, bp_zi = lfilter(b, a, src, zi=bp_zi)
             rumble, rumble_zi = lfilter(rumble_b, rumble_a, src, zi=rumble_zi)
-            mix = (bp * 1.5 * 0.75 + rumble * 4.0 * 0.55) * amp_eff
+            # single-band wind isn't split into grave/medium/aigu; expose the whole
+            # voice under "low" so band-solo still surfaces it (band solo is a 3band thing).
+            comp["low"] = (bp * 1.5 * 0.75 + rumble * 4.0 * 0.55) * amp_eff
 
         # Bourdon: narrow bandpass on the same pink noise at root + optional 5th/3rd.
         # Pitched-wind whistle (like air across a bottle), not a sine pad. Tracks the
@@ -318,7 +327,7 @@ def make_audio_callback(state: State):
                     n_voices += 1
 
             # high-Q bandpass on noise has low RMS; boost so the whistle sits with the wind.
-            mix = mix + (voices / n_voices) * amp_eff * tone_level * 4.0
+            comp["bourdon"] = (voices / n_voices) * amp_eff * tone_level * 4.0
 
         # Organ voice: a pipe-organ drone driven by the same wind you hear as noise.
         if organ_mode:
@@ -387,7 +396,14 @@ def make_audio_callback(state: State):
                         band, organ_air_zi[j] = lfilter(ab, aa, src, zi=organ_air_zi[j])
                         air = air + band * w
 
-            mix = mix + (stack * ORGAN_GAIN + air * AIR_BOOST * organ_air) * organ_amp_eff
+            comp["organ"] = (stack * ORGAN_GAIN + air * AIR_BOOST * organ_air) * organ_amp_eff
+
+        # Solo: with any solo flag set, mix only those layers so the player can hear
+        # one in isolation (grave/medium/aigu/bourdon/orgue). Empty set = mix all.
+        keys = comp.keys() & solo if solo else comp.keys()
+        mix = np.zeros(frames, dtype=np.float64)
+        for k in keys:
+            mix = mix + comp[k]
 
         mix32 = np.tanh(mix * drive).astype(np.float32)
 
