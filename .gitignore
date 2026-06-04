@@ -27,3 +27,8 @@ CLAUDE.md
 # Local hardware references / downloaded tools (not part of the synth)
 *.AppImage
 stairville_dds_405_manual.pdf
+
+# Private dramaturgy / exhibition source material (Jesus Triste, la gueuse) — keep offline
+jesus_triste_vent_dramaturgie.md
+jesus_triste_texte_integral.txt
+notes.txt
