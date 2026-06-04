@@ -32,3 +32,6 @@ stairville_dds_405_manual.pdf
 jesus_triste_vent_dramaturgie.md
 jesus_triste_texte_integral.txt
 notes.txt
+
+# Arduino toolchain for flashing the stream firmware (local, not versioned)
+.toolchain/

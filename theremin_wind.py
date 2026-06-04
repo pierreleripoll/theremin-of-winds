@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
 """
-Real-time wind-noise synth driven by an OpenTheremin V4 (MIDI firmware).
+Real-time wind-noise synth driven by an OpenTheremin V4.
 
-The OpenTheremin V4 with the MrDham/Vincent Dhamelincourt MIDI firmware sends
-raw MIDI bytes over USB serial @ 31250 baud (it is NOT a USB-MIDI device).
-This script reads that serial stream directly, parses MIDI inline, and drives
-a small real-time wind synth (band-passed white + low-passed brown noise).
-
-Default mapping (matches the firmware's defaults: ch 1, pitch-bend on, loop
-antenna -> CC7):
-  - Note On + Pitch Bend  -> bandpass center frequency  (wind "speed")
-  - CC 1 / 7 / 11 / 74    -> output amplitude           (wind "intensity")
-  - Note On velocity      -> initial amplitude until a CC arrives
-  - Note Off              -> amplitude target -> 0 (smooth release)
+By default it reads the custom value-stream firmware (OpenThereminV4/): ASCII
+"P<pitch> V<vol> M<mute>" lines over USB serial @ 115200, where pitch/vol are the
+firmware's linearized readings -- continuous, high-resolution control. With --midi
+it reads the legacy MrDham MIDI firmware instead (raw MIDI @ 31250, not USB-MIDI).
+Either way it drives a small real-time wind synth (band-passed white + low-passed
+brown noise): pitch antenna -> frequency ("speed"), volume antenna -> amplitude
+("intensity").
 
 Usage:
   python theremin_wind.py --list                  # list serial + audio devices
-  python theremin_wind.py                         # auto-pick /dev/ttyUSB* or ACM*
+  python theremin_wind.py                         # value-stream firmware (default)
+  python theremin_wind.py --debug                 # print every reading, no TUI
+  python theremin_wind.py --midi                  # legacy MIDI firmware
   python theremin_wind.py --serial /dev/ttyUSB0
-  python theremin_wind.py --debug                 # print every MIDI msg
 """
 import argparse
 import sys
@@ -29,9 +26,12 @@ import sounddevice as sd
 
 from audio import make_audio_callback
 from autoplay import autoplay_loop
-from config import BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, DMX_STAGES, SR
+from config import (
+    BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, DMX_STAGES, SR, STREAM_BAUD,
+)
 from dmx import dmx_loop, find_dmx_port
 from midi import find_serial_port, list_serial_ports, serial_loop
+from stream import stream_loop
 from presets import load_preset
 from state import State
 from theremin_push import push_loop
@@ -42,8 +42,11 @@ def main():
     ap.add_argument("--list", action="store_true",
                     help="list serial + audio devices and exit")
     ap.add_argument("--serial", help="serial port (default: first /dev/ttyACM* or ttyUSB*)")
-    ap.add_argument("--baud", type=int, default=BAUD,
-                    help=f"baud rate (default {BAUD}; use 115200 if firmware is in USB-Hairless mode)")
+    ap.add_argument("--baud", type=int, default=None,
+                    help=f"baud rate (default {STREAM_BAUD} for the value stream, {BAUD} for --midi)")
+    ap.add_argument("--midi", action="store_true",
+                    help="read the legacy MrDham MIDI firmware (raw MIDI @ 31250) instead of the "
+                         "value stream; only needed if the OpenTheremin is reflashed back to MIDI")
     ap.add_argument("--audio", help="audio output device name substring")
     ap.add_argument("--debug", action="store_true",
                     help="print every MIDI message (disables TUI)")
@@ -91,6 +94,8 @@ def main():
     ap.add_argument("--dashboard-url", default="http://localhost:8000/theremin-live",
                     help="dashboard ingest endpoint (default: local FastAPI bridge)")
     args = ap.parse_args()
+    if args.baud is None:
+        args.baud = BAUD if args.midi else STREAM_BAUD
 
     if args.list:
         print("Serial ports:")
@@ -166,8 +171,9 @@ def main():
     elif sim:
         input_thread = None  # no theremin; autoplay is the only input
     else:
+        reader = serial_loop if args.midi else stream_loop
         input_thread = threading.Thread(
-            target=serial_loop, args=(state, port, args.baud, args.debug), daemon=True
+            target=reader, args=(state, port, args.baud, args.debug), daemon=True
         )
     if input_thread is not None:
         input_thread.start()

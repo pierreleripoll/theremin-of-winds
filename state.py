@@ -12,6 +12,7 @@ from config import (
     MID_Q_MAX, NOTE_HI, NOTE_LO, ORGAN_AIR, ORGAN_BRIGHTNESS,
     ORGAN_FALL_S, ORGAN_LEVEL, ORGAN_OCTAVE, ORGAN_RISE_S, ORGAN_THRESHOLD,
     ORGAN_WIND, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
+    STREAM_PITCH_FULL, STREAM_VOL_FULL,
     TREM_DEPTH, TREM_PITCH, TREM_RATE, VOL_CURVE,
 )
 
@@ -162,6 +163,30 @@ class State:
                 self.target_position = val / 127.0
             else:
                 self.target_amp = self._shape_amp(val / 127.0)
+
+    def stream_input(self, pitch_raw: int, vol_raw: int, playing: bool):
+        """Continuous-value input from the custom --stream firmware (stream.py).
+
+        pitch_raw/vol_raw are the firmware's linearized pitch/volume. We map them
+        onto the same note/target_amp pipeline the MIDI path uses, so rest-corner
+        calibration (calibrate.py) and the audio gate work unchanged: at rest the
+        hands are far -> volume reads loud and pitch reads low, which is exactly the
+        corner calibrate.py samples. `playing` is the instrument's mute button."""
+        # A live reading is presence, like an incoming MIDI message: bump msg_count.
+        self.msg_count += 1
+        if self.autoplay_on:
+            # autoplay owns the synth; ignore the live theremin (see midi.py).
+            return
+        ratio = max(0.0, min(1.0, pitch_raw / STREAM_PITCH_FULL))
+        # Store a continuous "note" so recompute_freq + the rest-corner gate (which
+        # compares note <= rest_note + margin) keep working without a real MIDI note.
+        self.note = NOTE_LO + ratio * (NOTE_HI - NOTE_LO)
+        self.pitch_bend = 0
+        self.recompute_freq()
+        if not playing:
+            self.target_amp = 0.0
+            return
+        self.target_amp = self._shape_amp(vol_raw / STREAM_VOL_FULL)
 
     def fake_xy(self, x_norm: float, y_norm: float):
         """Trackpad fake-input: x ∈ [0,1] → freq (log). Y is amp normally;

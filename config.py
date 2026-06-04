@@ -64,6 +64,16 @@ VOL_CURVE = 3.0
 
 BAUD = 31250  # MrDham firmware in "true DIN MIDI" mode (Serial.begin(31250))
 
+# --stream mode: the custom OpenTheremin V4 firmware (OpenThereminV4/, build.h
+# SERIAL_PORT_MODE_STREAM) emits ASCII "P<pitch> V<vol> M<mute>\n" at ~200 Hz over
+# 115200 baud instead of MIDI. pitch/vol are the firmware's linearized values, so
+# we get continuous high-resolution control with no MIDI quantization. The full-scale
+# constants map those raw ranges onto the synth's 0..1 control range and want tuning
+# against the actual instrument (play the loudest / highest you reach -> set to that).
+STREAM_BAUD = 115200
+STREAM_PITCH_FULL = 8000.0    # streamPitch reading mapped to the top of the note range
+STREAM_VOL_FULL = 4095.0      # streamVol reading mapped to full volume (firmware clamps here)
+
 # Auto-play (demo) mode (--autoplay / 'a'): a background thread wanders the pitch
 # and volume the way a hand would on the instrument, so the synth plays itself with
 # no theremin. It eases between random "gesture" waypoints with occasional lulls, and
