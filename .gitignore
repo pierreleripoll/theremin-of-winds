@@ -35,3 +35,6 @@ notes.txt
 
 # Arduino toolchain for flashing the stream firmware (local, not versioned)
 .toolchain/
+
+# upstream hardware design files (not vendored; keep only the firmware Software/ subtree)
+OpenThereminV4/Electronics/
