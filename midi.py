@@ -107,12 +107,20 @@ def serial_loop(state: State, port: str, baud: int, debug: bool):
 # and would otherwise be picked first, leaving the synth listening to silence.
 THEREMIN_VIDS = (0x1A86,)
 
+# Devices that share the USB-serial bus but are positively NOT the theremin, so
+# auto-selection must never fall back to them. The Enttec DMX USB Pro (FTDI
+# 0403:6001) is the one that bites: if the theremin is unplugged, picking the
+# Enttec makes the MIDI reader silently "read" the DMX port and parse nothing,
+# which looks exactly like a dead theremin.
+NON_THEREMIN_VID_PIDS = ((0x0403, 0x6001),)
+
 
 def list_serial_ports() -> list[str]:
     """Candidate USB-serial ports, theremin (CH340) first.
 
     Filters to real USB devices (those report a vendor id), dropping the
-    motherboard's legacy /dev/ttyS* ports.
+    motherboard's legacy /dev/ttyS* ports. Lists everything (incl. the Enttec)
+    so --list stays useful for diagnostics; auto-selection is stricter.
     """
     ports = [p for p in serial.tools.list_ports.comports() if p.vid is not None]
     ports.sort(key=lambda p: (p.vid not in THEREMIN_VIDS, p.device))
@@ -122,9 +130,15 @@ def list_serial_ports() -> list[str]:
 def find_serial_port(requested: str | None) -> str:
     if requested:
         return requested
-    candidates = list_serial_ports()
+    ports = [p for p in serial.tools.list_ports.comports() if p.vid is not None]
+    # Never auto-grab a port we know is not a theremin (the Enttec DMX), so an
+    # absent theremin raises a clear error instead of leaving MIDI reading the
+    # DMX port. CH340 (THEREMIN_VIDS) still sorts ahead of any other adapter.
+    candidates = [p for p in ports if (p.vid, p.pid) not in NON_THEREMIN_VID_PIDS]
+    candidates.sort(key=lambda p: (p.vid not in THEREMIN_VIDS, p.device))
     if not candidates:
         raise RuntimeError(
-            "no USB-serial port found — is the OpenTheremin plugged in?"
+            "no OpenTheremin serial port found — is it plugged in? "
+            "(the Enttec DMX port is ignored on purpose)"
         )
-    return candidates[0]
+    return candidates[0].device
