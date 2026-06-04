@@ -78,19 +78,33 @@ AUTOPLAY_AMP_HI = 1.0         # loudest gust
 AUTOPLAY_REST_PROB = 0.2      # chance a gesture is a near-silent lull instead
 AUTOPLAY_REST_AMP = 0.08      # volume during a lull (eases the wind down, not fully out)
 
-# DMX output (Enttec DMX USB Pro, opt-in via --dmx): drive a fan on a power dimmer
-# while the synth makes sound. The dimmer is addressed at channel 50.
+# DMX output (Enttec DMX USB Pro, opt-in via --dmx): drive curtain fans on a
+# power dimmer while the synth makes sound. The dimmer (DDS-405) is addressed at
+# DMX_CHANNEL, its four outlets landing on DMX_CHANNEL..DMX_CHANNEL+3.
 DMX_BAUD = 57600        # FTDI side; the Pro generates DMX timing itself, so this is nominal
-DMX_CHANNEL = 50        # dimmer/fan address (1..512)
+DMX_CHANNEL = 100       # dimmer base address: outlet 1 = this DMX channel (1..512)
 DMX_ON_LEVEL = 255      # channel value at full (switch mode = on; dim mode = loudest wind)
 DMX_FRAME_HZ = 40       # how often we refresh the DMX frame
-DMX_SOUND_EPS = 5e-3    # gated output amplitude above this counts as "making sound"
-DMX_HOLD_S = 0.5        # keep the fan on this long after sound stops (anti-flicker)
 DMX_RAMP_S = 0.25       # smooth the channel value toward its target (gentle on the dimmer)
+
+# Two-tier fan engagement. Each stage integrates "loudness" into its own charge
+# in [0,1] that rises (time constant attack_s) while sound_level >= loud_at and
+# decays (decay_s) when it's quieter; the stage engages when its charge crosses
+# engage_at and only releases once it falls back below disengage_at (hysteresis).
+# This gives the "loud-ish for a moment, keeps blowing through a short stop"
+# inertia, per outlet. Fields:
+#   (label, outlet, loud_at, attack_s, decay_s, engage_at, disengage_at)
+#   - "play"  : normal playing wakes the curtain          -> outlet 2 (DMX 101)
+#   - "storm" : only sustained very loud wind adds a gust  -> outlet 4 (DMX 103)
+# `outlet` is 1-based relative to DMX_CHANNEL. Outlets 1 and 3 are left dark.
+DMX_STAGES = [
+    ("play",  2, 0.08, 1.0, 3.0, 0.55, 0.20),
+    ("storm", 4, 0.45, 4.0, 5.0, 0.85, 0.40),
+]
 # Proportional ("dim") mode: map wind intensity to fan speed. A fan on a triac
-# dimmer won't start spinning below some voltage, so when there's sound we never
-# go below DMX_MIN_LEVEL; the loudest wind (sound level >= DMX_FULL_AT) reaches
-# DMX_ON_LEVEL. Tune DMX_MIN_LEVEL with `dmx_test.py 50 <n>` to where your fan
+# dimmer won't start spinning below some voltage, so when engaged we never go
+# below DMX_MIN_LEVEL; the loudest wind (sound level >= DMX_FULL_AT) reaches
+# DMX_ON_LEVEL. Tune DMX_MIN_LEVEL with `dmx_test.py 100 <n>` to where your fan
 # reliably starts.
 DMX_MIN_LEVEL = 80      # lowest level that still spins the fan (0..255)
 DMX_FULL_AT = 0.7       # sound level that maps to DMX_ON_LEVEL
