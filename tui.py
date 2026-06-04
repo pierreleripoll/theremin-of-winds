@@ -15,44 +15,77 @@ class Knob(NamedTuple):
     hi: float
     step: float
     fmt: str
+    desc: str  # one-line help shown when this knob is selected
 
 
 # Macro knobs at the top write through to fine knobs below.
 MACROS = [
-    Knob("» wind bright", "brightness",   0.0,   1.0,   0.05, "{:>6.2f}   "),
-    Knob("» whistle    ", "whistle",      0.0,   1.0,   0.05, "{:>6.2f}   "),
+    Knob("» wind bright", "brightness",   0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Macro brillance : 0 = sombre/calme, 1 = vif/orageux (pilote gain aigu + drive)"),
+    Knob("» whistle    ", "whistle",      0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Macro sifflement : 0 = sans resonance, 1 = plein (pilote Q aigu + Q medium)"),
 ]
 KNOB_DEFS = MACROS + [
-    Knob("low band  Fc", "low_fc",     20.0,  500.0,  10.0,  "{:>6.0f} Hz"),
-    Knob("low band   Q", "low_q",       0.3,    5.0,   0.1,  "{:>6.2f}   "),
-    Knob("high band Fc", "high_fc",  1000.0, 8000.0, 100.0,  "{:>6.0f} Hz"),
-    Knob("high band  Q", "high_q",      1.0,   20.0,   0.5,  "{:>6.2f}   "),
-    Knob("high band  G", "high_band_gain",0.0,  1.0,   0.05, "{:>6.2f}   "),
-    Knob("mid Fc lo   ", "mid_fc_lo", 100.0,  800.0,  25.0,  "{:>6.0f} Hz"),
-    Knob("mid Fc hi   ", "mid_fc_hi", 800.0, 5000.0, 100.0,  "{:>6.0f} Hz"),
-    Knob("mid Q max   ", "mid_q_max",   0.0,   8.0,   0.25, "{:>6.2f}   "),
-    Knob("gust depth  ", "gust_depth",   0.0,   1.0,   0.05, "{:>6.2f}   "),
-    Knob("gust tau    ", "gust_tau_s",   0.2,   8.0,   0.2,  "{:>6.1f} s "),
-    Knob("Q drift     ", "q_drift_depth",0.0,   0.5,   0.02, "{:>6.2f}   "),
-    Knob("Q drift tau ", "q_drift_tau_s",0.5,   8.0,   0.5,  "{:>6.1f} s "),
-    Knob("drive       ", "drive",        0.5,  10.0,   0.2,  "{:>6.2f}   "),
-    Knob("tone level  ", "tone_level",   0.0,   1.0,   0.05, "{:>6.2f}   "),
-    Knob("bourdon Q   ", "bourdon_q",    2.0,  30.0,   1.0,  "{:>6.1f}   "),
-    Knob("organ octave", "organ_octave",-3.0,   0.0,   1.0,  "{:>+6.0f}   "),
-    Knob("organ bright", "organ_brightness", 0.0, 1.0,  0.05, "{:>6.2f}   "),
-    Knob("organ air   ", "organ_air",    0.0,   1.0,   0.05, "{:>6.2f}   "),
-    Knob("organ wind  ", "organ_wind",   0.0,   1.0,   0.05, "{:>6.2f}   "),
-    Knob("organ level ", "organ_level",  0.0,   1.5,   0.05, "{:>6.2f}   "),
-    Knob("organ thresh", "organ_threshold", 0.0, 1.0,  0.05, "{:>6.2f}   "),
-    Knob("organ rise  ", "organ_rise_s", 0.5,  20.0,   0.5,  "{:>6.1f} s "),
-    Knob("organ fall  ", "organ_fall_s", 0.5,  20.0,   0.5,  "{:>6.1f} s "),
-    Knob("trem depth  ", "trem_depth",   0.0,   0.5,   0.02, "{:>6.2f}   "),
-    Knob("trem rate   ", "trem_rate",    3.0,   8.0,   0.1,  "{:>6.2f} Hz"),
-    Knob("trem pitch  ", "trem_pitch",   0.0,  0.02,   0.001,"{:>6.3f}   "),
-    Knob("pan floor   ", "pan_floor",    0.0,   0.5,   0.02, "{:>6.2f}   "),
-    Knob("vol curve   ", "vol_curve",    1.0,   6.0,   0.25, "{:>6.2f}   "),
-    Knob("attack      ", "attack_s",     0.0,  10.0,   0.2,  "{:>6.1f} s "),
-    Knob("release     ", "release_s",    0.2,  10.0,   0.2,  "{:>6.1f} s "),
+    Knob("low band  Fc", "low_fc",     20.0,  500.0,  10.0,  "{:>6.0f} Hz",
+         "Frequence centrale de la bande grave (le corps du vent)"),
+    Knob("low band   Q", "low_q",       0.3,    5.0,   0.1,  "{:>6.2f}   ",
+         "Resonance de la bande grave (haut = plus etroit et pointu)"),
+    Knob("high band Fc", "high_fc",  1000.0, 8000.0, 100.0,  "{:>6.0f} Hz",
+         "Frequence centrale de la bande aigue (le sifflement du haut)"),
+    Knob("high band  Q", "high_q",      1.0,   20.0,   0.5,  "{:>6.2f}   ",
+         "Resonance de la bande aigue (haut = plus siffleur)"),
+    Knob("high band  G", "high_band_gain",0.0,  1.0,   0.05, "{:>6.2f}   ",
+         "Niveau de la bande aigue (0 = pas de 'sizzle' dans le haut)"),
+    Knob("mid Fc lo   ", "mid_fc_lo", 100.0,  800.0,  25.0,  "{:>6.0f} Hz",
+         "Frequence du medium quand la main est en bas (vent grave)"),
+    Knob("mid Fc hi   ", "mid_fc_hi", 800.0, 5000.0, 100.0,  "{:>6.0f} Hz",
+         "Frequence du medium quand la main est en haut (vent aigu)"),
+    Knob("mid Q max   ", "mid_q_max",   0.0,   8.0,   0.25, "{:>6.2f}   ",
+         "Resonance max du medium selon le volume (haut = plus siffleur quand ca joue fort)"),
+    Knob("gust depth  ", "gust_depth",   0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Profondeur des rafales (modulation lente et aleatoire du volume)"),
+    Knob("gust tau    ", "gust_tau_s",   0.2,   8.0,   0.2,  "{:>6.1f} s ",
+         "Duree d'une rafale (constante de temps : plus haut = rafales plus lentes)"),
+    Knob("Q drift     ", "q_drift_depth",0.0,   0.5,   0.02, "{:>6.2f}   ",
+         "Profondeur de la derive de resonance (donne de la vie au timbre)"),
+    Knob("Q drift tau ", "q_drift_tau_s",0.5,   8.0,   0.5,  "{:>6.1f} s ",
+         "Vitesse de la derive de resonance (plus haut = derive plus lente)"),
+    Knob("drive       ", "drive",        0.5,  10.0,   0.2,  "{:>6.2f}   ",
+         "Saturation tanh : 1.2 = transparent, >3 = chaud, >8 = sature ('horreur')"),
+    Knob("tone level  ", "tone_level",   0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Niveau du bourdon : voix sifflee accordee ajoutee au vent (0 = absente)"),
+    Knob("bourdon Q   ", "bourdon_q",    2.0,  30.0,   1.0,  "{:>6.1f}   ",
+         "Finesse du bourdon (haut = sifflement etroit/accorde, bas = plus aerien)"),
+    Knob("organ octave", "organ_octave",-3.0,   0.0,   1.0,  "{:>+6.0f}   ",
+         "Octave de la note grave de l'orgue (-3 = pedale tres grave)"),
+    Knob("organ bright", "organ_brightness", 0.0, 1.0,  0.05, "{:>6.2f}   ",
+         "Brillance de l'orgue : 0 = sombre/grave, 1 = plein choeur brillant"),
+    Knob("organ air   ", "organ_air",    0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Souffle resonant dans le tuyau metallique (l'air dans la pipe)"),
+    Knob("organ wind  ", "organ_wind",   0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Couplage vent vers orgue : a quel point les rafales animent l'orgue"),
+    Knob("organ level ", "organ_level",  0.0,   1.5,   0.05, "{:>6.2f}   ",
+         "Volume global de l'orgue par rapport au vent (bas = discret)"),
+    Knob("organ thresh", "organ_threshold", 0.0, 1.0,  0.05, "{:>6.2f}   ",
+         "Seuil de vent au-dessus duquel l'orgue se reveille"),
+    Knob("organ rise  ", "organ_rise_s", 0.5,  20.0,   0.5,  "{:>6.1f} s ",
+         "Temps de vent fort soutenu avant que l'orgue soit pleinement la"),
+    Knob("organ fall  ", "organ_fall_s", 0.5,  20.0,   0.5,  "{:>6.1f} s ",
+         "Temps que l'orgue met a s'eteindre quand le vent retombe"),
+    Knob("trem depth  ", "trem_depth",   0.0,   0.5,   0.02, "{:>6.2f}   ",
+         "Profondeur du tremolo (tremulant d'orgue sur le volume)"),
+    Knob("trem rate   ", "trem_rate",    3.0,   8.0,   0.1,  "{:>6.2f} Hz",
+         "Vitesse du tremolo (Hz ; un tremulant classique est a 5-6 Hz)"),
+    Knob("trem pitch  ", "trem_pitch",   0.0,  0.02,   0.001,"{:>6.3f}   ",
+         "Vibrato de hauteur periodique de l'orgue (~5 cents)"),
+    Knob("pan floor   ", "pan_floor",    0.0,   0.5,   0.02, "{:>6.2f}   ",
+         "Plancher du pan stereo : 0 = pan dur, 0.5 = a peine panoramique"),
+    Knob("vol curve   ", "vol_curve",    1.0,   6.0,   0.25, "{:>6.2f}   ",
+         "Courbe de volume : >1 etire la zone douce pour un controle fin des faibles"),
+    Knob("attack      ", "attack_s",     0.0,  10.0,   0.2,  "{:>6.1f} s ",
+         "Temps de montee en regime du vent quand une main revient"),
+    Knob("release     ", "release_s",    0.2,  10.0,   0.2,  "{:>6.1f} s ",
+         "Temps de fondu du vent quand la main s'en va"),
 ]
 MACRO_ATTRS = {k.attr for k in MACROS}
 
@@ -95,7 +128,7 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
     stdscr.timeout(100)  # 10 Hz redraw
 
     KNOBS_TOP = 6
-    FOOTER_H = 6  # blank + live + note + amp + blank + help
+    FOOTER_H = 8  # desc + blank + live + note + amp + blank + help (+1 gap above)
     sel = 0
     top = 0  # first visible knob; scrolls to keep `sel` on screen on short terminals
     status = ""        # transient footer message (e.g. "saved preset")
@@ -124,8 +157,14 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
 
         max_y, max_x = stdscr.getmaxyx()
         n = len(KNOB_DEFS)
-        avail = max(1, max_y - KNOBS_TOP - FOOTER_H)  # knob rows that fit
-        top, visible = _scroll(sel, top, avail, n)
+        # two-column grid, filled column-major: left column is the first n_rows
+        # knobs, right column the rest. ↑↓ walks the linear index, so it runs down
+        # the left column then continues at the top of the right one.
+        n_rows = (n + 1) // 2
+        sel_row = sel if sel < n_rows else sel - n_rows
+        avail = max(1, max_y - KNOBS_TOP - FOOTER_H)  # grid rows that fit
+        top, visible = _scroll(sel_row, top, avail, n_rows)
+        col_w = max(24, max_x // 2)
 
         _put(stdscr, 0, 0, "─── theremin wind ──────────────────────────────", max_x)
         _put(stdscr, 1, 0,
@@ -146,22 +185,31 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         hdr = "knobs:  (» = macro)"
         if top > 0:
             hdr += "   ↑ more"
-        if top + visible < n:
+        if top + visible < n_rows:
             hdr += "   ↓ more"
         _put(stdscr, 5, 0, hdr, max_x)
-        for vi in range(visible):
-            i = top + vi
+
+        def draw_cell(i: int, x: int, cell_w: int):
             k = KNOB_DEFS[i]
             marker = "▶" if i == sel else " "
             line = f" {marker} {k.label}  {k.fmt.format(knob_vals[i])}"
             attrs = curses.A_BOLD if k.attr in MACRO_ATTRS else 0
             if i == sel:
                 attrs |= curses.A_REVERSE
-            _put(stdscr, KNOBS_TOP + vi, 0, line, max_x, attrs)
+            _put(stdscr, KNOBS_TOP + vi, x, line, cell_w, attrs)
+
+        for vi in range(visible):
+            r = top + vi
+            draw_cell(r, 0, col_w)            # left column
+            if r + n_rows < n:
+                draw_cell(r + n_rows, col_w, max_x)  # right column
 
         frow = KNOBS_TOP + visible + 1  # footer sits just below the visible knobs
-        _put(stdscr, frow, 0, "live:", max_x)
-        _put(stdscr, frow + 1, 2,
+        ksel = KNOB_DEFS[sel]
+        _put(stdscr, frow, 0, f" {ksel.label.strip()}: {ksel.desc}",
+             max_x, curses.A_BOLD)
+        _put(stdscr, frow + 2, 0, "live:", max_x)
+        _put(stdscr, frow + 3, 2,
              f"note={str(note) if note is not None else '--':>3}  "
              f"bend={bend:>+6}  freq={cf:>6.1f} Hz", max_x)
         spatial_str = f"  pos={cp:.2f}" if usp else ""
@@ -173,13 +221,13 @@ def tui_loop(stdscr, state: State, port: str, baud: int, fake: bool = False):
         else:
             rn = f"{rest_note:.0f}" if rest_note is not None else "--"
             rest_str = f"rest={rest_amp:.2f}/{rn}"
-        _put(stdscr, frow + 2, 2,
+        _put(stdscr, frow + 4, 2,
              f"amp={ca:.2f}  tilt={tilt:.2f}{spatial_str}  {cc_str}  {rest_str}", max_x)
         if status_frames > 0:
-            _put(stdscr, frow + 3, 0, status, max_x, curses.A_BOLD)
+            _put(stdscr, frow + 5, 0, status, max_x, curses.A_BOLD)
             status_frames -= 1
         toggles = "3/g/5/t/o/s/a/d" if dmxa else "3/g/5/t/o/s/a"
-        _put(stdscr, frow + 4, 0,
+        _put(stdscr, frow + 6, 0,
              f"↑↓ select   ←→ adjust   {toggles} toggle   c calib   w save   q quit", max_x)
         stdscr.refresh()
 
