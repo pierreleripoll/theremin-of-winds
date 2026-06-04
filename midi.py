@@ -37,6 +37,10 @@ class MidiSerialReader:
             print(f"[midi] ch{ch+1:>2} {kind:#04x} {data}")
         with self.state.lock:
             self.state.msg_count += 1
+            if self.state.autoplay_on:
+                # autoplay owns the synth; ignore the theremin (which may be
+                # streaming its rest corner) so the two don't fight the targets.
+                return
             if kind == 0x90 and data[1] > 0:
                 self.state.note_on(data[0], data[1])
             elif kind == 0x80 or (kind == 0x90 and data[1] == 0):

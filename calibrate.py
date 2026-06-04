@@ -48,10 +48,21 @@ def calibrate_loop(state: State, stop):
     `calibrating` holds the synth silent through every sample (including the first
     seconds after launch), so the instrument never blasts before it knows its rest
     point, and the sample is taken while the operator is stepping back."""
-    with state.lock:
-        state.calibrating = True
+    # Hold the synth silent from boot through the first sample so it never blasts
+    # before it knows its rest point. But if we launched into autoplay the sound is
+    # intentional: don't silence it, and defer the first sample until autoplay is
+    # switched off -- autoplay both masks the rest corner and suppresses the MIDI
+    # the sample needs (see midi.py). The activity-timeout gate covers idle meanwhile.
+    if not state.autoplay_on:
+        with state.lock:
+            state.calibrating = True
     if not stop.wait(CALIB_STARTUP_DELAY_S):
-        _sample(state, CALIB_SAMPLE_S)
+        while state.autoplay_on and not stop.is_set():
+            stop.wait(0.05)
+        if not stop.is_set():
+            with state.lock:
+                state.calibrating = True
+            _sample(state, CALIB_SAMPLE_S)
     with state.lock:
         state.calibrating = False
 

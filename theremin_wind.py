@@ -102,9 +102,9 @@ def main():
                 print(f"  [{i}] {d['name']}  ({d['hostapi']})")
         return
 
-    if args.autoplay or args.maxautoplay:
-        port = "autoplay (simulated, no hardware)"
-    elif args.fake:
+    sim = False  # True only when no theremin is present and we fall back to a
+    # hardware-less autoplay demo (autoplay then drives everything).
+    if args.fake:
         try:
             from trackpad import open_touchpad, trackpad_loop
             tpad = open_touchpad(args.trackpad_dev)
@@ -122,7 +122,18 @@ def main():
             )
         port = f"{tpad.path}  [{tpad.name}]"
     else:
-        port = find_serial_port(args.serial)
+        # Open a real theremin even with --autoplay/--maxautoplay: autoplay is a
+        # background gesture generator gated by state.autoplay_on, so the live
+        # theremin must stay wired up -- otherwise toggling autoplay off ('a')
+        # leaves nothing driving the synth. Fall back to a hardware-less demo only
+        # when no theremin is found and autoplay was requested.
+        try:
+            port = find_serial_port(args.serial)
+        except RuntimeError as e:
+            if args.autoplay or args.maxautoplay:
+                port, sim = "autoplay (simulated, no hardware)", True
+            else:
+                sys.exit(str(e))
 
     if args.audio:
         sd.default.device = (None, args.audio)
@@ -145,14 +156,15 @@ def main():
 
     cb = make_audio_callback(state)
 
-    # Input source. --autoplay needs no hardware: the autoplay thread (started below,
-    # always running but gated by state.autoplay_on) is the only input.
-    if args.autoplay or args.maxautoplay:
-        input_thread = None
-    elif args.fake:
+    # Input source. A real theremin is wired up whenever one is present (even in
+    # autoplay) so toggling autoplay off hands control back to it; `sim` is set only
+    # when no theremin was found and we fell back to a hardware-less autoplay demo.
+    if args.fake:
         input_thread = threading.Thread(
             target=trackpad_loop, args=(state, tpad, args.grab), daemon=True
         )
+    elif sim:
+        input_thread = None  # no theremin; autoplay is the only input
     else:
         input_thread = threading.Thread(
             target=serial_loop, args=(state, port, args.baud, args.debug), daemon=True
