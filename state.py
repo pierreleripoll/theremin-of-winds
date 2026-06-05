@@ -7,10 +7,11 @@ then synthesizes without holding it.
 import threading
 
 from config import (
-    ATTACK_S, DRIVE, FREQ_HI, FREQ_LO, GUST_DEPTH, GUST_TAU_S,
-    HIGH_BAND_GAIN, HIGH_FC, HIGH_Q, LOW_FC, LOW_Q, MID_FC_HI, MID_FC_LO,
+    AMP_RISE_S, ATTACK_S, DRIVE, FREQ_HI, FREQ_LO, GUST_DEPTH, GUST_TAU_S,
+    HIGH_BAND_GAIN, HIGH_FC, HIGH_Q, INERTIA_MAX_ADD_S, LOW_FC, LOW_Q, MID_FC_HI, MID_FC_LO,
     MID_Q_MAX, NOTE_HI, NOTE_LO, ORGAN_AIR, ORGAN_BRIGHTNESS,
     ORGAN_FALL_S, ORGAN_LEVEL, ORGAN_OCTAVE, ORGAN_RISE_S, ORGAN_THRESHOLD,
+    MIC_DAMPING, MIC_EQ_BANDS, MIC_GAIN, MIC_GATE, MIC_ROOM, MIC_SEND,
     ORGAN_WIND, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
     REVERB_DAMPING, REVERB_MIX, REVERB_ROOM,
     STEREO_WIDTH, STORM, STREAM_PITCH_FULL, STREAM_VOL_FULL,
@@ -28,6 +29,12 @@ class State:
         self.cur_amp = 0.0
         self.attack_s = ATTACK_S  # auto-wind spin-up time (TUI knob)
         self.release_s = RELEASE_S  # auto-wind fade-out time (TUI knob)
+        # Inertia on amplitude RISES (TUI knobs). amp_rise_s is the anti-blast slew on
+        # louder hand positions (config.py AMP_RISE_S); inertia_add_s is the extra
+        # wind-machine spin-up lag added after a long idle (INERTIA_MAX_ADD_S). Both
+        # default to the exhibition values; lower them for snappy live play.
+        self.amp_rise_s = AMP_RISE_S
+        self.inertia_add_s = INERTIA_MAX_ADD_S
         self.vol_curve = VOL_CURVE  # exponent shaping the 0..127 volume into amplitude
         self.note: int | None = None
         self.pitch_bend = 0  # signed: -8192..+8191
@@ -98,6 +105,22 @@ class State:
         self.reverb_mix = REVERB_MIX        # wet/dry blend (0 = off)
         self.reverb_room = REVERB_ROOM      # decay length / room size
         self.reverb_damping = REVERB_DAMPING  # high-freq damping of the tail
+        # microphone (sung voice), only live with --mic. Added clean (never through the
+        # wind's tanh drive), with its OWN reverb instance: same room/damping as the
+        # wind but an independent wet level. mic_gain=0 -> reverb-only, for use with the
+        # interface's zero-latency hardware monitoring of the dry voice.
+        self.mic_gain = MIC_GAIN            # dry voice level (0 = none / hardware monitoring)
+        self.mic_send = MIC_SEND            # voice reverb wet level (independent of reverb_mix)
+        self.mic_room = MIC_ROOM            # voice reverb room size (independent of the wind)
+        self.mic_damping = MIC_DAMPING      # voice reverb damping (darker tail tames howl)
+        self.mic_gate = MIC_GATE            # noise gate threshold on the mic (anti-Larsen)
+        # Parametric EQ on the mic (4 peaking bands, each Fc/Q/gain dB). Flat (0 dB)
+        # = transparent. Stored as flat attrs so the TUI knob list and preset save
+        # pick them up unchanged; mic_eq_bands() gathers them for the audio callback.
+        for i, (fc, q, g) in enumerate(MIC_EQ_BANDS, start=1):
+            setattr(self, f"mic_eq{i}_fc", fc)
+            setattr(self, f"mic_eq{i}_q", q)
+            setattr(self, f"mic_eq{i}_gain", g)
         # macros: setting these writes through to the fine knobs above.
         # Defaults of 1.0 reproduce the historical "stormy" sound; 1.0 maps to the
         # same fine-knob values just assigned, so direct-set bypasses the setter.
@@ -134,6 +157,12 @@ class State:
         self._whistle = v
         self.high_q = 1.0 + (HIGH_Q - 1.0) * v
         self.mid_q_max = MID_Q_MAX * v
+
+    def mic_eq_bands(self) -> list[tuple[float, float, float]]:
+        """The mic parametric-EQ bands as (Fc, Q, gain dB). Call under State.lock
+        (the audio callback snapshots it inside its lock block)."""
+        return [(getattr(self, f"mic_eq{i}_fc"), getattr(self, f"mic_eq{i}_q"),
+                 getattr(self, f"mic_eq{i}_gain")) for i in range(1, len(MIC_EQ_BANDS) + 1)]
 
     def _shape_amp(self, norm: float) -> float:
         """Map a normalized 0..1 volume (from MIDI velocity / CC) to amplitude via

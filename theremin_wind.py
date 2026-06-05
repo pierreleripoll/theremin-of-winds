@@ -39,6 +39,21 @@ from state import State
 from theremin_push import push_loop
 
 
+def _resolve_device(substr: str, kind: str) -> int:
+    """Resolve a device-name substring to a device index for 'input' or 'output'.
+    Exits with the list of candidates if nothing matches -- clearer than PortAudio's
+    raw error. Note: under PipeWire the interface is usually reached via the 'default'
+    / 'pipewire' device rather than its own name, so prefer leaving this unset and
+    selecting the card as the system default."""
+    key = "max_input_channels" if kind == "input" else "max_output_channels"
+    cands = [(i, d["name"]) for i, d in enumerate(sd.query_devices()) if d[key] > 0]
+    hits = [(i, n) for i, n in cands if substr.lower() in n.lower()]
+    if not hits:
+        avail = "\n".join(f"  [{i}] {n}" for i, n in cands)
+        sys.exit(f"no {kind} device matching {substr!r}. Available {kind}s:\n{avail}")
+    return hits[0][0]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--list", action="store_true",
@@ -50,6 +65,11 @@ def main():
                     help="read the legacy MrDham MIDI firmware (raw MIDI @ 31250) instead of the "
                          "value stream; only needed if the OpenTheremin is reflashed back to MIDI")
     ap.add_argument("--audio", help="audio output device name substring")
+    ap.add_argument("--mic", action="store_true",
+                    help="capture a sung-voice mic from the sound-card input and run it "
+                         "through the same reverb as the wind (opens a full-duplex stream)")
+    ap.add_argument("--mic-device",
+                    help="input device name substring for --mic (default: system default input)")
     ap.add_argument("--debug", action="store_true",
                     help="print every MIDI message (disables TUI)")
     ap.add_argument("--no-tui", action="store_true",
@@ -112,6 +132,10 @@ def main():
         for i, d in enumerate(sd.query_devices()):
             if d["max_output_channels"] > 0:
                 print(f"  [{i}] {d['name']}  ({d['hostapi']})")
+        print("\nAudio inputs (for --mic-device):")
+        for i, d in enumerate(sd.query_devices()):
+            if d["max_input_channels"] > 0:
+                print(f"  [{i}] {d['name']}  ({d['hostapi']})")
         return
 
     sim = False  # True only when no theremin is present and we fall back to a
@@ -147,8 +171,9 @@ def main():
             else:
                 sys.exit(str(e))
 
-    if args.audio:
-        sd.default.device = (None, args.audio)
+    # Resolve optional device substrings to explicit indices (None = system default).
+    in_dev = _resolve_device(args.mic_device, "input") if (args.mic and args.mic_device) else None
+    out_dev = _resolve_device(args.audio, "output") if args.audio else None
 
     state = State()
     # Restore the saved knobs/toggles (preset.json) if present, then let explicit
@@ -166,7 +191,7 @@ def main():
     state.autoplay_on = args.autoplay or args.maxautoplay
     state.muted = args.mute
 
-    cb = make_audio_callback(state)
+    cb = make_audio_callback(state, with_input=args.mic)
 
     # Input source. A real theremin is wired up whenever one is present (even in
     # autoplay) so toggling autoplay off hands control back to it; `sim` is set only
@@ -247,10 +272,20 @@ def main():
 
     use_tui = not (args.no_tui or args.debug)
 
-    with sd.OutputStream(
-        samplerate=SR, blocksize=BLOCK, channels=2,
-        dtype="float32", callback=cb, latency="low",
-    ):
+    # --mic opens a full-duplex stream (one mono input channel + stereo out) so the
+    # sung voice can share the reverb. Round-trip latency is one block in + one out
+    # (~2 x BLOCK / SR); lower BLOCK in config.py if the singer needs tighter monitoring.
+    if args.mic:
+        stream = sd.Stream(
+            samplerate=SR, blocksize=BLOCK, channels=(1, 2), device=(in_dev, out_dev),
+            dtype="float32", callback=cb, latency="low",
+        )
+    else:
+        stream = sd.OutputStream(
+            samplerate=SR, blocksize=BLOCK, channels=2, device=out_dev,
+            dtype="float32", callback=cb, latency="low",
+        )
+    with stream:
         if use_tui:
             import curses
             import os

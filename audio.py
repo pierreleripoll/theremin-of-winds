@@ -31,9 +31,9 @@ import numpy as np
 from scipy.signal import iirfilter, lfilter, lfilter_zi
 
 from config import (
-    AMP_EPS, AMP_RISE_S, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S,
-    INERTIA_IDLE_FULL_S, INERTIA_MAX_ADD_S, REST_AMP_MARGIN, REST_NOTE_MARGIN,
-    RUMBLE_CUTOFF, SMOOTH_MS, SR,
+    AMP_EPS, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S,
+    INERTIA_IDLE_FULL_S, MIC_GATE_ATTACK_S, MIC_GATE_RELEASE_S,
+    REST_AMP_MARGIN, REST_NOTE_MARGIN, RUMBLE_CUTOFF, SMOOTH_MS, SR,
     STORM_DRIVE, STORM_GUST_DEPTH, STORM_GUST_TAU, STORM_HIGH, STORM_MIDQ,
     STORM_SOFT_BODY, STORM_SOFT_DARK,
 )
@@ -46,6 +46,13 @@ PINK_POLES = [0.99886, 0.99332, 0.96900, 0.86650, 0.55000, -0.7616]
 PINK_GAINS = [0.0555179, 0.0750759, 0.1538520, 0.3104856, 0.5329522, -0.0168980]
 PINK_DIRECT = 0.5362
 PINK_SCALE = 0.11
+
+# Voice-reverb high-cut driven by mic_damping (anti-Larsen). A one-pole low-pass on
+# the signal feeding the voice reverb, ON TOP of the reverb's own internal damping, so
+# mic_damping is a strong "darkness" control: it kills the top end where Larsen howls
+# without touching the dry voice. mic_damping=0 -> ~no cut; 1 -> aggressive (FC_LO).
+MIC_DAMP_FC_HI = 18000.0
+MIC_DAMP_FC_LO = 900.0
 
 # Pipe organ "principal chorus": harmonic multiples of the played pitch and their
 # raw levels (8' 4' 2-2/3' 2' 1-3/5' 1-1/3' 1'). The 7th harmonic is skipped — no
@@ -94,17 +101,37 @@ def build_biquad_bandpass(fc: float, Q: float, sr: int):
     return b / a[0], a / a[0]
 
 
-def make_audio_callback(state: State):
+def build_peaking_biquad(fc: float, Q: float, gain_db: float, sr: int):
+    """RBJ peaking (bell) EQ: a boost/cut of gain_db at fc with bandwidth set by Q.
+    gain_db = 0 is the identity filter (flat). Used by the mic parametric EQ."""
+    A = 10.0 ** (gain_db / 40.0)
+    w0 = 2.0 * math.pi * min(fc, sr * 0.45) / sr
+    cos_w0 = math.cos(w0)
+    alpha = math.sin(w0) / (2.0 * max(Q, 1e-4))
+    b = np.array([1.0 + alpha * A, -2.0 * cos_w0, 1.0 - alpha * A], dtype=np.float64)
+    a = np.array([1.0 + alpha / A, -2.0 * cos_w0, 1.0 - alpha / A], dtype=np.float64)
+    return b / a[0], a / a[0]
+
+
+def make_audio_callback(state: State, with_input: bool = False):
     """Audio callback. Reads feature flags + knobs from State each block, so a
-    TUI thread can mutate them live."""
+    TUI thread can mutate them live.
+
+    with_input=True returns a full-duplex callback (sd.Stream): it receives the
+    sound-card input (a sung-voice mic), mixes it clean into the output and feeds
+    it into the same reverb as the wind. with_input=False returns the original
+    output-only callback (sd.OutputStream), byte-for-byte unchanged."""
     rumble_b, rumble_a = iirfilter(
         2, RUMBLE_CUTOFF / (SR / 2.0), btype="low", ftype="butter"
     )
     # All filter states carry two columns (left/right noise) and are filtered along
     # axis 0, so the stereo decorrelation costs nothing structurally: width just sets
     # how independent the two noise columns are (see the noise source in the callback).
-    # output-bus reverb (stereo Freeverb), applied after the drive saturation.
+    # output-bus reverb (stereo Freeverb), applied after the drive saturation. The
+    # sung voice gets its OWN reverb instance -- same room/damping (one shared space)
+    # but an independent wet level, so the voice can be wetter or drier than the wind.
     reverb = StereoReverb(SR)
+    mic_reverb = StereoReverb(SR) if with_input else None
 
     rumble_zi = np.zeros((2, 2))
     bp_zi = np.zeros((2, 2))
@@ -131,9 +158,18 @@ def make_audio_callback(state: State):
 
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
     alpha_smooth = 1.0 - math.exp(-1.0 / max(tau_blocks, 1.0))
-    # slower one-pole for amplitude RISES only (anti-blast slew, see callback).
-    rise_blocks = AMP_RISE_S * SR / BLOCK
-    alpha_amp_up = 1.0 - math.exp(-1.0 / max(rise_blocks, 1.0))
+    # The amplitude-RISE slew (anti-blast) and restart inertia are live TUI knobs
+    # (state.amp_rise_s / state.inertia_add_s), so alpha_amp_up is recomputed per
+    # block from the snapshot below rather than fixed here.
+    # mic noise-gate envelope (anti-Larsen), carried across blocks; fast attack, slow
+    # release so word tails aren't chopped. 0 = closed (muted), 1 = open.
+    gate_env = 0.0
+    gate_atk_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(MIC_GATE_ATTACK_S, 1e-4))
+    gate_rel_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(MIC_GATE_RELEASE_S, 1e-4))
+    mic_lp_zi = np.zeros(1)  # one-pole high-cut state for the voice reverb send
+    # Per-band biquad state for the mic parametric EQ, carried across blocks so a
+    # live knob change doesn't click. Mono voice -> length-2 zi per band.
+    mic_eq_zi = [np.zeros(2) for _ in range(4)] if with_input else []
 
     # auto-wind presence gate (see config.py): the firmware stops sending MIDI when
     # no hand is near, so we fade the output out once messages stop arriving.
@@ -153,18 +189,20 @@ def make_audio_callback(state: State):
         norm = math.sqrt((2.0 - alpha) / alpha)
         return new_state, 1.0 + depth * math.tanh(new_state * norm * 0.7)
 
-    def callback(outdata, frames, time_info, status):
+    def _process(outdata, frames, mic):
+        """Synthesize one block into outdata. mic is the input block (frames, mono)
+        for full-duplex, or None when output-only."""
         nonlocal rumble_zi, bp_zi, low_zi, mid_zi, high_zi, gust_state, q_drift_state
         nonlocal bourd_root_zi, bourd_fifth_zi, bourd_third_zi
         nonlocal organ_phase, trem_phase, organ_waver_state, organ_swell
-        nonlocal presence, last_msg_count, blocks_since_msg, idle_secs
-        if status:
-            print(f"[audio] {status}", file=sys.stderr)
+        nonlocal presence, last_msg_count, blocks_since_msg, idle_secs, gate_env, mic_lp_zi
 
         with state.lock:
             tf, ta = state.target_freq, state.target_amp
             attack_s = state.attack_s
             release_s = state.release_s
+            amp_rise_s = state.amp_rise_s
+            inertia_add_s = state.inertia_add_s
             msg_count = state.msg_count
             note = state.note
             rest_amp, rest_note = state.rest_amp, state.rest_note
@@ -188,6 +226,12 @@ def make_audio_callback(state: State):
             reverb_mix = state.reverb_mix
             reverb_room = state.reverb_room
             reverb_damping = state.reverb_damping
+            mic_gain = state.mic_gain
+            mic_send = state.mic_send
+            mic_room = state.mic_room
+            mic_damping = state.mic_damping
+            mic_gate = state.mic_gate
+            mic_eq = state.mic_eq_bands() if mic is not None else None
             muted = state.muted
             solo = set(state.solo)
             tp = state.target_position
@@ -225,6 +269,10 @@ def make_audio_callback(state: State):
         )
         gated_off = resting or calibrating
 
+        # amplitude-rise slew from the live knob (0 s = instant rise, no anti-blast).
+        rise_blocks = amp_rise_s * SR / BLOCK
+        alpha_amp_up = 1.0 - math.exp(-1.0 / max(rise_blocks, 1.0))
+
         state.cur_freq += (tf - state.cur_freq) * alpha_smooth
         # Asymmetric amplitude slew. The volume antenna reads "hand far = loud", so
         # pulling a hand off the instrument (or just standing away) spikes the target
@@ -254,7 +302,7 @@ def make_audio_callback(state: State):
             # Once spun up (presence ~ full) the banked inertia is spent, so play is
             # fully responsive again until the next long idle.
             inertia = min(idle_secs / INERTIA_IDLE_FULL_S, 1.0)
-            eff_attack_s = attack_s + INERTIA_MAX_ADD_S * inertia
+            eff_attack_s = attack_s + inertia_add_s * inertia
             att_tau_blocks = max(eff_attack_s, 0.01) * SR / BLOCK
             presence += (1.0 - presence) * (1.0 - math.exp(-1.0 / att_tau_blocks))
             if presence >= 1.0 - AMP_EPS:
@@ -466,24 +514,84 @@ def make_audio_callback(state: State):
         # Saturate the stereo bus, then add the reverb tail on top of the saturated
         # (dry) signal -- a clean tail rather than the drive grinding the reverb. The
         # dry passes through untouched, so the reverb adds no latency; only mix > 0
-        # spends any CPU. This is the shared bus a future sung-voice mic would join.
+        # spends any CPU. This is the shared bus the sung-voice mic also joins.
         sat = np.tanh(mix * drive_eff)
+
+        # Sung-voice mic (full-duplex only): a clean mono voice, centred. The voice
+        # never goes through the wind's tanh drive, so it stays undistorted. A noise
+        # gate (anti-Larsen) mutes it below mic_gate so the reverb tail can't re-enter
+        # the mic and run away during silence -- the env opens fast, closes slowly, and
+        # is ramped within the block so gating never clicks.
+        voice = None
+        if mic is not None:
+            voice = np.asarray(mic, dtype=np.float64).reshape(-1)  # mono, gated below
+            level = math.sqrt(float(np.mean(voice * voice)))
+            target = 1.0 if level > mic_gate else 0.0
+            prev = gate_env
+            gate_env += (target - gate_env) * (gate_atk_alpha if target > gate_env
+                                               else gate_rel_alpha)
+            voice = voice * np.linspace(prev, gate_env, frames)
+
+            # Parametric EQ on the gated voice, before it splits into the dry add
+            # and the reverb send (so it shapes both). Each peaking band runs only
+            # when it isn't flat (0 dB = identity), keeping a transparent EQ free.
+            for i, (fc, q, g) in enumerate(mic_eq):
+                if abs(g) < 0.05:
+                    continue
+                if i >= len(mic_eq_zi):
+                    mic_eq_zi.append(np.zeros(2))
+                eb, ea = build_peaking_biquad(fc, q, g, SR)
+                voice, mic_eq_zi[i] = lfilter(eb, ea, voice, zi=mic_eq_zi[i])
+
+        # Wind reverb: a wet/dry crossfade on the wind only (unchanged when no mic).
         if reverb_mix > 0.0:
             wet = reverb.process(sat, reverb_room, reverb_damping)
-            sat = sat * (1.0 - reverb_mix) + wet * reverb_mix
+            out = sat * (1.0 - reverb_mix) + wet * reverb_mix
+        else:
+            out = sat
+
+        # Voice: its OWN reverb (independent room/damping AND level, mic_room/mic_damping/
+        # mic_send) plus an optional dry add (mic_gain; keep 0 to monitor the dry voice
+        # through the interface at zero latency).
+        if voice is not None:
+            if mic_send > 0.0:
+                # high-cut the reverb send by mic_damping (on top of the reverb's own
+                # damping) so the tail darkens hard and the high Larsen can't build --
+                # the dry voice (below) skips this filter, so it stays clear.
+                fc = MIC_DAMP_FC_HI * (MIC_DAMP_FC_LO / MIC_DAMP_FC_HI) ** mic_damping
+                a_lp = 1.0 - math.exp(-2.0 * math.pi * min(fc, SR * 0.45) / SR)
+                vlp, mic_lp_zi = lfilter([a_lp], [1.0, -(1.0 - a_lp)], voice, zi=mic_lp_zi)
+                vwet = mic_reverb.process(np.broadcast_to(vlp[:, None], (frames, 2)),
+                                          mic_room, mic_damping)
+                out = out + vwet * mic_send
+            if mic_gain > 0.0:
+                out = out + voice[:, None] * mic_gain
+            np.clip(out, -1.0, 1.0, out)  # master ceiling once the voice contributes
 
         n_ch = outdata.shape[1]
-        # sat is a decorrelated stereo pair. On a stereo device, emit it directly.
+        # out is a decorrelated stereo pair. On a stereo device, emit it directly.
         # Spatial mode is a hand-controlled point source, not a diffuse field, so it
         # folds to mono and pans; mono/surround devices fold down and replicate.
         if spatial_mode and n_ch >= 2:
-            mono = sat.mean(axis=1).astype(np.float32)
+            mono = out.mean(axis=1).astype(np.float32)
             gains = np.asarray(pan_gains(state.cur_position, n_ch, pan_floor),
                                dtype=np.float32)
             outdata[:] = mono[:, None] * gains
         elif n_ch == 2:
-            outdata[:] = sat.astype(np.float32)
+            outdata[:] = out.astype(np.float32)
         else:
-            outdata[:] = sat.mean(axis=1).astype(np.float32)[:, None]
+            outdata[:] = out.mean(axis=1).astype(np.float32)[:, None]
 
+    # Wrap _process in the signature PortAudio expects for each stream type.
+    if with_input:
+        def callback(indata, outdata, frames, time_info, status):
+            if status:
+                print(f"[audio] {status}", file=sys.stderr)
+            mic = indata[:, 0] if indata.ndim == 2 and indata.shape[1] else indata.reshape(-1)
+            _process(outdata, frames, mic)
+    else:
+        def callback(outdata, frames, time_info, status):
+            if status:
+                print(f"[audio] {status}", file=sys.stderr)
+            _process(outdata, frames, None)
     return callback

@@ -56,6 +56,20 @@ CALIB_SAMPLE_S = 1.5          # how long to watch the resting reading while samp
 REST_AMP_MARGIN = 0.07        # volume within this of the resting max still counts as rest
 REST_NOTE_MARGIN = 3.0        # note within this many semitones of the resting low = rest
 
+# Auto-recalibration. The theremin drifts as it warms up and with the room, so a
+# rest corner sampled once goes stale and the idle wind creeps back -- and nobody
+# is there to press 'c' during the exhibition. So we follow the drift: while real
+# MIDI streams, calibrate.py tracks a rolling window of readings and, when they
+# stay within a tight band for AUTO_RECAL_WINDOW_S in the loud rest region, adopts
+# that steady reading as the new rest corner. The long window is the safety: a
+# playing hand always jitters and moves, so only the no-hands rest posture (loudest
+# volume + lowest note, held dead-steady) can pass it.
+AUTO_RECAL_WINDOW_S = 25.0    # readings must stay this stable to count as "at rest"
+AUTO_RECAL_AMP_SPAN = 0.06    # max target-amp spread over the window to count as steady
+AUTO_RECAL_NOTE_SPAN = 2.0    # max note spread (semitones) over the window
+AUTO_RECAL_MIN_AMP = 0.60     # only adopt a rest point when the steady volume is this loud
+AUTO_RECAL_INTERVAL_S = 8.0   # minimum time between auto-recalibrations
+
 # Volume response curve. The theremin sends a 0..127 volume value; we raise the
 # normalized value to this power before it becomes amplitude. >1 spends more of the
 # input travel in the quiet region, so small hand movements give fine control over
@@ -108,7 +122,7 @@ DMX_RAMP_S = 0.25       # smooth the channel value toward its target (gentle on 
 #   - "storm" : only sustained very loud wind adds a gust  -> outlet 4 (DMX 103)
 # `outlet` is 1-based relative to DMX_CHANNEL. Outlets 1 and 3 are left dark.
 DMX_STAGES = [
-    ("play",  2, 0.08, 1.0, 3.0, 0.55, 0.20),
+    ("play",  2, 0.08, 0.001, 0.001, 0.5, 0.5),  # TEST: zero inertia (instant on/off at loud_at)
     ("storm", 4, 0.45, 4.0, 5.0, 0.85, 0.40),
 ]
 # Proportional ("dim") mode: map wind intensity to fan speed. A fan on a triac
@@ -195,6 +209,42 @@ STEREO_WIDTH = 0.6
 REVERB_MIX = 0.25          # wet/dry blend: 0 = dry only (off), 1 = fully wet
 REVERB_ROOM = 0.7          # room size / decay length: 0 = small/tight, 1 = long hall
 REVERB_DAMPING = 0.5       # high-frequency damping in the tail: 0 = bright, 1 = dark
+
+# Microphone input (opt-in via --mic): a sung-voice mic enters through the sound
+# card input. The voice is NOT run through the wind's tanh drive (that would distort
+# it) -- it is added clean. It gets its OWN reverb instance (same room/damping as the
+# wind, so one shared space, but an independent wet LEVEL). Its dry and reverb paths
+# are independent too: keep mic_gain=0 to monitor the dry voice with zero latency
+# through the interface's own direct monitoring and take ONLY the reverb from software
+# (a delay on the wet is inaudible, unlike on the dry).
+MIC_GAIN = 0.0     # dry voice level added to the output. Default 0: the singer monitors
+                   # the dry voice live through the interface (zero latency); software
+                   # adds only the reverb. Raise it for a software dry voice too.
+MIC_SEND = 1.0     # voice reverb wet level, independent of the wind's reverb_mix (0 = dry voice)
+MIC_ROOM = 0.7     # voice reverb room size / decay, independent of the wind's reverb size
+MIC_DAMPING = 0.75 # voice reverb damping: higher = darker tail. Drives both the reverb's
+                   # internal damping AND a high-cut on the voice reverb send, so raising
+                   # it strongly kills the high-frequency Larsen (audio.py MIC_DAMP_FC_*).
+# Noise gate on the mic input (anti-Larsen): below this input RMS the mic is muted, so
+# the reverb tail can't re-enter the mic and run away during silence. It is the main
+# guard against feedback for a live-monitored voice; 0 = gate off. Raise it just above
+# the room/noise floor but below the quietest singing. Attack/release are fixed below.
+MIC_GATE = 0.02
+MIC_GATE_ATTACK_S = 0.005   # how fast the gate opens when singing starts
+MIC_GATE_RELEASE_S = 0.15   # how slowly it closes after (avoids chopping word tails)
+
+# Parametric EQ on the sung-voice mic (--mic only). Applied to the gated voice
+# BEFORE it splits into the dry add and the reverb send, so it shapes both. Four
+# fully parametric peaking bands -- each (centre Hz, Q, gain dB). All default to
+# 0 dB (flat / identity), so the EQ is transparent until a band is dialed; a band
+# at 0 dB is skipped (no CPU). Boost to find a voice's presence, or pull a narrow
+# notch (high Q, negative gain) onto a ringing Larsen frequency to kill it.
+MIC_EQ_BANDS = [
+    (120.0,  0.7, 0.0),   # low body
+    (500.0,  1.0, 0.0),   # low-mid (boxiness / mud)
+    (2500.0, 1.0, 0.0),   # presence
+    (7000.0, 0.7, 0.0),   # air / sibilance
+]
 
 # Pipe organ mode (toggle with 'o'): an additive harmonic stack (the way an organ
 # stacks pipe ranks) blended with pink noise resonating in the "tube", so it sounds
