@@ -12,7 +12,7 @@ from config import (
     MID_Q_MAX, NOTE_HI, NOTE_LO, ORGAN_AIR, ORGAN_BRIGHTNESS,
     ORGAN_FALL_S, ORGAN_LEVEL, ORGAN_OCTAVE, ORGAN_RISE_S, ORGAN_THRESHOLD,
     ORGAN_WIND, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
-    STREAM_PITCH_FULL, STREAM_VOL_FULL,
+    STEREO_WIDTH, STORM, STREAM_PITCH_FULL, STREAM_VOL_FULL,
     TREM_DEPTH, TREM_PITCH, TREM_RATE, VOL_CURVE,
 )
 
@@ -66,6 +66,10 @@ class State:
         self.drive = DRIVE
         self.high_band_gain = HIGH_BAND_GAIN
         self.mid_q_max = MID_Q_MAX
+        # storm macro: depth of how strongly the played volume morphs the wind's
+        # character (breeze <-> storm). Plain scalar -- the per-block scaling lives in
+        # the audio callback (it depends on the live amp, which setters can't see).
+        self.storm = STORM
         self.tone_level = 0.0  # bourdon voice (pitched-wind intervals) added on top of wind
         self.bourdon_q = 12.0  # higher = narrower whistle, more pitched; lower = airier
         # organ mode knobs (only active when organ_mode is on)
@@ -86,6 +90,9 @@ class State:
         self.target_position = 0.5  # 0..1, 0 = full left, 1 = full right
         self.cur_position = 0.5
         self.pan_floor = 0.15  # minimum gain on the "off" side; 0 = hard pan, 0.5 = barely panned
+        # stereo width: drive L/R with independent noise (correlated by 1-width) so
+        # the wind becomes an enveloping field (0 = dual mono, 1 = fully decorrelated).
+        self.stereo_width = STEREO_WIDTH
         # macros: setting these writes through to the fine knobs above.
         # Defaults of 1.0 reproduce the historical "stormy" sound; 1.0 maps to the
         # same fine-knob values just assigned, so direct-set bypasses the setter.

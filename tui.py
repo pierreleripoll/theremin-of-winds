@@ -24,6 +24,8 @@ MACROS = [
          "Macro brillance : 0 = sombre/calme, 1 = vif/orageux (pilote gain aigu + drive)"),
     Knob("» whistle    ", "whistle",      0.0,   1.0,   0.05, "{:>6.2f}   ",
          "Macro sifflement : 0 = sans resonance, 1 = plein (pilote Q aigu + Q medium)"),
+    Knob("» storm      ", "storm",        0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Macro tempete : 0 = le volume ne change que le niveau, 1 = la brise devient tempete (volume fort = vent plus vif/rafaleux/sature)"),
 ]
 KNOB_DEFS = MACROS + [
     Knob("low band  Fc", "low_fc",     20.0,  500.0,  10.0,  "{:>6.0f} Hz",
@@ -78,6 +80,8 @@ KNOB_DEFS = MACROS + [
          "Vitesse du tremolo (Hz ; un tremulant classique est a 5-6 Hz)"),
     Knob("trem pitch  ", "trem_pitch",   0.0,  0.02,   0.001,"{:>6.3f}   ",
          "Vibrato de hauteur periodique de l'orgue (~5 cents)"),
+    Knob("stereo width", "stereo_width",  0.0,   1.0,   0.05, "{:>6.2f}   ",
+         "Largeur stereo : 0 = mono (centre), 1 = vent large et enveloppant"),
     Knob("pan floor   ", "pan_floor",    0.0,   0.5,   0.02, "{:>6.2f}   ",
          "Plancher du pan stereo : 0 = pan dur, 0.5 = a peine panoramique"),
     Knob("vol curve   ", "vol_curve",    1.0,   6.0,   0.25, "{:>6.2f}   ",

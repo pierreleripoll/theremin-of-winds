@@ -9,6 +9,11 @@ Signal flow per block:
     → tanh saturation (drive knob)
     → optional stereo pan (spatial mode)
 
+The noise source is generated as two independent realisations (left/right),
+correlated by rho = 1 - stereo_width, and run through the SAME filters, so the wind
+widens into an enveloping stereo field without comb-filtering (the "stereo width"
+knob). The organ's tonal partials are summed mono (centred); only the breath spreads.
+
 Organ mode layers a pipe-organ drone on top of the wind voice (it does not replace
 it): an additive harmonic stack (sine partials at multiples of a deep root note)
 blended with pink noise resonating at the same harmonics (the "air in the metal
@@ -29,6 +34,8 @@ from config import (
     AMP_EPS, AMP_RISE_S, BLOCK, FREQ_HI, FREQ_LO, IDLE_TIMEOUT_S,
     INERTIA_IDLE_FULL_S, INERTIA_MAX_ADD_S, REST_AMP_MARGIN, REST_NOTE_MARGIN,
     RUMBLE_CUTOFF, SMOOTH_MS, SR,
+    STORM_DRIVE, STORM_GUST_DEPTH, STORM_GUST_TAU, STORM_HIGH, STORM_MIDQ,
+    STORM_SOFT_BODY, STORM_SOFT_DARK,
 )
 from state import State
 
@@ -92,27 +99,31 @@ def make_audio_callback(state: State):
     rumble_b, rumble_a = iirfilter(
         2, RUMBLE_CUTOFF / (SR / 2.0), btype="low", ftype="butter"
     )
-    rumble_zi = lfilter_zi(rumble_b, rumble_a) * 0.0
-    bp_zi = np.zeros(2)
+    # All filter states carry two columns (left/right noise) and are filtered along
+    # axis 0, so the stereo decorrelation costs nothing structurally: width just sets
+    # how independent the two noise columns are (see the noise source in the callback).
+    rumble_zi = np.zeros((2, 2))
+    bp_zi = np.zeros((2, 2))
 
-    low_zi = np.zeros(2)
-    mid_zi = np.zeros(2)
-    high_zi = np.zeros(2)
-    pink_zis = [np.zeros(1) for _ in PINK_POLES]
+    low_zi = np.zeros((2, 2))
+    mid_zi = np.zeros((2, 2))
+    high_zi = np.zeros((2, 2))
+
+    pink_zis = [np.zeros((1, 2)) for _ in PINK_POLES]
     gust_state = 0.0
     q_drift_state = 0.0
 
     # zi persists across blocks so coef changes (player moves the theremin) don't click.
-    bourd_root_zi = np.zeros(2)
-    bourd_fifth_zi = np.zeros(2)
-    bourd_third_zi = np.zeros(2)
+    bourd_root_zi = np.zeros((2, 2))
+    bourd_fifth_zi = np.zeros((2, 2))
+    bourd_third_zi = np.zeros((2, 2))
 
     # organ-mode oscillator + tremulant phase, carried across blocks like the zi above.
     organ_phase = 0.0
     trem_phase = 0.0
     organ_waver_state = 0.0  # slow random-walk pitch waver
     organ_swell = 0.0  # slow envelope: how present the organ is, built by sustained strong wind
-    organ_air_zi = [np.zeros(2), np.zeros(2), np.zeros(2)]  # resonant air bands (f0, 2f0, 3f0)
+    organ_air_zi = [np.zeros((2, 2)), np.zeros((2, 2)), np.zeros((2, 2))]  # air bands (f0, 2f0, 3f0)
 
     tau_blocks = (SMOOTH_MS / 1000.0) * SR / BLOCK
     alpha_smooth = 1.0 - math.exp(-1.0 / max(tau_blocks, 1.0))
@@ -169,6 +180,7 @@ def make_audio_callback(state: State):
             tone_level = state.tone_level
             bourdon_q = state.bourdon_q
             spatial_mode = state.spatial_mode
+            stereo_width = state.stereo_width
             muted = state.muted
             solo = set(state.solo)
             tp = state.target_position
@@ -181,6 +193,7 @@ def make_audio_callback(state: State):
             drive = state.drive
             high_band_gain = state.high_band_gain
             mid_q_max = state.mid_q_max
+            storm = state.storm
 
         # idle = no new MIDI messages for IDLE_TIMEOUT_S (firmware went quiet).
         fresh_msg = msg_count != last_msg_count
@@ -244,11 +257,31 @@ def make_audio_callback(state: State):
         amp = max(0.0, min(1.0, state.cur_amp)) * presence
         state.sound_level = float(amp)  # read by the DMX thread to gate the fan
 
-        # Paul Kellet's 6-pole IIR + white passthrough.
-        white = rng.standard_normal(frames).astype(np.float64) * 0.4
+        # Storm morph: let the played volume drive the wind's CHARACTER, not just its
+        # level -- soft = poetic breeze, loud = violent storm. `m` is biased to the loud
+        # end (amp^1.5) so soft play stays calm and the storm only hits near full volume;
+        # `soft` grows as you play quieter (the muffled-breeze terms). At storm=0 every
+        # effective value below collapses to the old expression.
+        s = storm
+        m = s * (amp ** 1.5)
+        soft = s * (1.0 - amp)
+        drive_eff = drive * (1.0 + STORM_DRIVE * m)
+
+        # Two independent white-noise realisations for left/right, correlated by rho so
+        # the two output channels can be decorrelated without ever phase-combing (the
+        # failure of the old allpass widener): rho=1 (width 0) = identical columns ->
+        # dual mono; rho=0 (width 1) = independent -> fully diffuse. A linear mix of
+        # independent noises stays flat-spectrum at every width, in stereo AND summed to
+        # mono (mono just loses up to 3 dB of level, never a notch). Both columns run
+        # the SAME filters below (axis 0): identical timbre, independent grain.
+        rho = 1.0 - max(0.0, min(1.0, stereo_width))
+        nL = rng.standard_normal(frames).astype(np.float64)
+        nR = rho * nL + math.sqrt(max(0.0, 1.0 - rho * rho)) * rng.standard_normal(frames)
+        # Paul Kellet's 6-pole IIR + white passthrough, run on both columns at once.
+        white = np.stack([nL, nR], axis=1) * 0.4   # (frames, 2)
         src = white * PINK_DIRECT
         for i, (pole, gain) in enumerate(zip(PINK_POLES, PINK_GAINS)):
-            y, pink_zis[i] = lfilter([gain], [1.0, -pole], white, zi=pink_zis[i])
+            y, pink_zis[i] = lfilter([gain], [1.0, -pole], white, axis=0, zi=pink_zis[i])
             src = src + y
         src *= PINK_SCALE
 
@@ -256,8 +289,11 @@ def make_audio_callback(state: State):
         # The gust LFO is the wind's slow breath; compute it whenever the wind OR the
         # organ needs it, so the organ can couple to the same gusting (see below).
         if use_gust or organ_mode:
-            gust_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(gust_tau_s, 0.05))
-            gust_state, gust_mod = lfo_step(gust_state, gust_alpha, gust_depth)
+            # storm: bigger and faster gusts when loud, gentle slow breath when soft.
+            gust_depth_eff = min(0.95, gust_depth * (1.0 + STORM_GUST_DEPTH * m))
+            gust_tau_eff = gust_tau_s * (1.0 - STORM_GUST_TAU * m)
+            gust_alpha = 1.0 - math.exp(-(BLOCK / SR) / max(gust_tau_eff, 0.05))
+            gust_state, gust_mod = lfo_step(gust_state, gust_alpha, gust_depth_eff)
         else:
             gust_mod = 1.0
         amp_eff = amp * gust_mod if use_gust else amp
@@ -277,29 +313,34 @@ def make_audio_callback(state: State):
             tilt = max(0.0, min(1.0, tilt))
 
             mid_fc = mid_fc_lo * (mid_fc_hi / mid_fc_lo) ** tilt
-            mid_Q = (1.2 + mid_q_max * (amp ** 0.6)) * q_mod
+            mid_Q = (1.2 + mid_q_max * (amp ** 0.6) * (1.0 + STORM_MIDQ * m)) * q_mod
 
             # rebuild biquads each block — cheap and lets knobs change live
             low_b, low_a = build_biquad_bandpass(low_fc, low_q, SR)
             mid_b, mid_a = build_biquad_bandpass(mid_fc, mid_Q, SR)
             high_b, high_a = build_biquad_bandpass(high_fc, high_q, SR)
 
-            low, low_zi = lfilter(low_b, low_a, src, zi=low_zi)
-            mid, mid_zi = lfilter(mid_b, mid_a, src, zi=mid_zi)
-            high, high_zi = lfilter(high_b, high_a, src, zi=high_zi)
+            low, low_zi = lfilter(low_b, low_a, src, axis=0, zi=low_zi)
+            mid, mid_zi = lfilter(mid_b, mid_a, src, axis=0, zi=mid_zi)
+            high, high_zi = lfilter(high_b, high_a, src, axis=0, zi=high_zi)
 
-            g_low = (1.0 - tilt) * 0.6 + 0.3
-            g_mid = 0.7
-            g_high = (tilt ** 3) * high_band_gain
+            # muffle the mid AND high bands for the soft poetic breeze. The high band
+            # alone is pitch-gated (tilt**3 ~ 0 at low/mid pitch), so darkening it does
+            # nothing audible when playing soft and low -- the mid band is the body you
+            # actually hear there, so the darkening has to reach it too.
+            g_dark = 1.0 - STORM_SOFT_DARK * soft
+            g_low = ((1.0 - tilt) * 0.6 + 0.3) * (1.0 + STORM_SOFT_BODY * soft)
+            g_mid = 0.7 * g_dark
+            g_high = (tilt ** 3) * high_band_gain * (1.0 + STORM_HIGH * m) * g_dark
 
             comp["low"] = low * g_low * 4.0 * amp_eff
             comp["mid"] = mid * g_mid * 1.5 * amp_eff
             comp["high"] = high * g_high * 1.5 * amp_eff
         else:
-            Q = (1.2 + (mid_q_max + 1.0) * (amp ** 0.6)) * q_mod
+            Q = (1.2 + (mid_q_max + 1.0) * (amp ** 0.6) * (1.0 + STORM_MIDQ * m)) * q_mod
             b, a = build_biquad_bandpass(f, Q, SR)
-            bp, bp_zi = lfilter(b, a, src, zi=bp_zi)
-            rumble, rumble_zi = lfilter(rumble_b, rumble_a, src, zi=rumble_zi)
+            bp, bp_zi = lfilter(b, a, src, axis=0, zi=bp_zi)
+            rumble, rumble_zi = lfilter(rumble_b, rumble_a, src, axis=0, zi=rumble_zi)
             # single-band wind isn't split into grave/medium/aigu; expose the whole
             # voice under "low" so band-solo still surfaces it (band solo is a 3band thing).
             comp["low"] = (bp * 1.5 * 0.75 + rumble * 4.0 * 0.55) * amp_eff
@@ -310,7 +351,7 @@ def make_audio_callback(state: State):
         if tone_level > 0.0:
             def voice(freq: float, zi):
                 b, a = build_biquad_bandpass(freq, bourdon_q, SR)
-                return lfilter(b, a, src, zi=zi)
+                return lfilter(b, a, src, axis=0, zi=zi)
 
             # f is pre-clamped to <= SR * 0.45; root is always safe to filter.
             voices, bourd_root_zi = voice(f, bourd_root_zi)
@@ -393,35 +434,44 @@ def make_audio_callback(state: State):
                     fk = f0 * k
                     if fk < SR * 0.45:
                         ab, aa = build_biquad_bandpass(fk, AIR_Q, SR)
-                        band, organ_air_zi[j] = lfilter(ab, aa, src, zi=organ_air_zi[j])
+                        band, organ_air_zi[j] = lfilter(ab, aa, src, axis=0, zi=organ_air_zi[j])
                         air = air + band * w
 
-            comp["organ"] = (stack * ORGAN_GAIN + air * AIR_BOOST * organ_air) * organ_amp_eff
+            # stack is the deterministic tonal partials -> mono (centred). air is the
+            # stereo noise breath. stack[:, None] broadcasts the tone onto both columns.
+            comp["organ"] = (stack[:, None] * ORGAN_GAIN + air * AIR_BOOST * organ_air) * organ_amp_eff
 
         # Solo: with any solo flag set, mix only those layers so the player can hear
         # one in isolation (grave/medium/aigu/bourdon/orgue). Empty set = mix all.
         keys = comp.keys() & solo if solo else comp.keys()
-        mix = np.zeros(frames, dtype=np.float64)
+        mix = np.zeros((frames, 2), dtype=np.float64)
         for k in keys:
             mix = mix + comp[k]
 
-        mix32 = np.tanh(mix * drive).astype(np.float32)
+        state.cur_tilt = (math.log(max(60.0, f)) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
 
         # Dashboard-only / mute: sound_level + cur_freq are already written above, so
         # the kiosk still animates; just emit silence to the speakers.
         if muted:
             outdata[:] = 0.0
-            state.cur_tilt = (math.log(max(60.0, f)) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
             return
 
         n_ch = outdata.shape[1]
+        # mix is already a decorrelated stereo pair (its two columns are the left/right
+        # noise realisations). On a stereo device, emit them directly. Spatial mode is a
+        # hand-controlled point source, not a diffuse field, so it folds to mono and
+        # pans; mono/surround devices fold down and replicate.
         if spatial_mode and n_ch >= 2:
+            mono = mix.mean(axis=1)
+            mix32 = np.tanh(mono * drive_eff).astype(np.float32)
             gains = np.asarray(pan_gains(state.cur_position, n_ch, pan_floor),
                                dtype=np.float32)
             outdata[:] = mix32[:, None] * gains
+        elif n_ch == 2:
+            outdata[:] = np.tanh(mix * drive_eff).astype(np.float32)
         else:
+            mono = mix.mean(axis=1)
+            mix32 = np.tanh(mono * drive_eff).astype(np.float32)
             outdata[:] = mix32[:, None]
-
-        state.cur_tilt = (math.log(max(60.0, f)) - math.log(FREQ_LO)) / (math.log(FREQ_HI) - math.log(FREQ_LO))
 
     return callback

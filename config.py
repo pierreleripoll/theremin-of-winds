@@ -144,6 +144,33 @@ HIGH_BAND_GAIN = 0.45
 # play means narrower (more whistly) mid band. 0 disables the ramp entirely.
 MID_Q_MAX = 4.0
 
+# Storm macro: how strongly the PLAYED volume (amp) morphs the wind's character,
+# from a soft poetic breeze (quiet) to a violent broadband storm (loud). 0 = old
+# behavior (amp only changes loudness); 1 = dramatic breeze<->storm swing. The morph
+# amount is biased toward the loud end (amp^1.5) so soft play stays calm -- which
+# matches VOL_CURVE=3 and the DMX "storm" fan that only wakes after sustained loud play.
+# STORM is the single user dial (TUI knob); the STORM_* coefficients are the fixed
+# shape of the morph (like ORGAN_WIND_BRIGHT etc.).
+STORM = 0.7                 # default depth: breeze->storm effect audible out of the box
+STORM_GUST_DEPTH = 1.5      # loud -> up to +150% gust depth (bigger gusts)
+STORM_GUST_TAU = 0.5        # loud -> gusts up to 50% faster (shorter correlation)
+STORM_HIGH = 2.0            # loud -> up to +200% high-band gain (top-end howl)
+STORM_DRIVE = 1.5           # loud -> up to +150% drive (saturation grit)
+STORM_MIDQ = 1.0            # loud -> up to +100% on the mid-Q ramp (whistlier)
+STORM_SOFT_DARK = 0.6       # very soft -> high band rolled down up to 60% (muffled breeze)
+STORM_SOFT_BODY = 0.25      # very soft -> up to +25% low-band body (rounded breeze)
+
+# Stereo decorrelation (the "stereo width" knob). The synth is built mono; this
+# widens it into an enveloping stereo field by driving the left and right channels
+# with two INDEPENDENT noise realisations (correlated by rho = 1 - width) through
+# the same filters: identical timbre on both sides, independent grain. Unlike a
+# phase-based (allpass) widener, mixing independent noises never comb-filters -- the
+# spectrum stays flat at every width, in stereo AND folded to mono (mono only loses
+# up to 3 dB of level, never gains a notch). The organ's tonal partials stay mono
+# (centred); only the noisy breath spreads. width=0 = dual mono, width=1 = fully
+# decorrelated. Mono-safe, so a non-zero default is fine.
+STEREO_WIDTH = 0.6
+
 # Pipe organ mode (toggle with 'o'): an additive harmonic stack (the way an organ
 # stacks pipe ranks) blended with pink noise resonating in the "tube", so it sounds
 # like wind howling through metal pipes (aeolian) rather than a clean electronic organ.
