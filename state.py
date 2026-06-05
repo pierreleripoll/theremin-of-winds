@@ -12,6 +12,7 @@ from config import (
     MID_Q_MAX, NOTE_HI, NOTE_LO, ORGAN_AIR, ORGAN_BRIGHTNESS,
     ORGAN_FALL_S, ORGAN_LEVEL, ORGAN_OCTAVE, ORGAN_RISE_S, ORGAN_THRESHOLD,
     ORGAN_WIND, Q_DRIFT_DEPTH, Q_DRIFT_TAU_S, RELEASE_S,
+    REVERB_DAMPING, REVERB_MIX, REVERB_ROOM,
     STEREO_WIDTH, STORM, STREAM_PITCH_FULL, STREAM_VOL_FULL,
     TREM_DEPTH, TREM_PITCH, TREM_RATE, VOL_CURVE,
 )
@@ -93,6 +94,10 @@ class State:
         # stereo width: drive L/R with independent noise (correlated by 1-width) so
         # the wind becomes an enveloping field (0 = dual mono, 1 = fully decorrelated).
         self.stereo_width = STEREO_WIDTH
+        # reverb (stereo Freeverb on the output bus, after drive). mix=0 bypasses.
+        self.reverb_mix = REVERB_MIX        # wet/dry blend (0 = off)
+        self.reverb_room = REVERB_ROOM      # decay length / room size
+        self.reverb_damping = REVERB_DAMPING  # high-freq damping of the tail
         # macros: setting these writes through to the fine knobs above.
         # Defaults of 1.0 reproduce the historical "stormy" sound; 1.0 maps to the
         # same fine-knob values just assigned, so direct-set bypasses the setter.

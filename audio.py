@@ -37,6 +37,7 @@ from config import (
     STORM_DRIVE, STORM_GUST_DEPTH, STORM_GUST_TAU, STORM_HIGH, STORM_MIDQ,
     STORM_SOFT_BODY, STORM_SOFT_DARK,
 )
+from reverb import StereoReverb
 from state import State
 
 # Paul Kellet's refined pink noise filter (6 parallel one-poles + white passthrough).
@@ -102,6 +103,9 @@ def make_audio_callback(state: State):
     # All filter states carry two columns (left/right noise) and are filtered along
     # axis 0, so the stereo decorrelation costs nothing structurally: width just sets
     # how independent the two noise columns are (see the noise source in the callback).
+    # output-bus reverb (stereo Freeverb), applied after the drive saturation.
+    reverb = StereoReverb(SR)
+
     rumble_zi = np.zeros((2, 2))
     bp_zi = np.zeros((2, 2))
 
@@ -181,6 +185,9 @@ def make_audio_callback(state: State):
             bourdon_q = state.bourdon_q
             spatial_mode = state.spatial_mode
             stereo_width = state.stereo_width
+            reverb_mix = state.reverb_mix
+            reverb_room = state.reverb_room
+            reverb_damping = state.reverb_damping
             muted = state.muted
             solo = set(state.solo)
             tp = state.target_position
@@ -456,22 +463,27 @@ def make_audio_callback(state: State):
             outdata[:] = 0.0
             return
 
+        # Saturate the stereo bus, then add the reverb tail on top of the saturated
+        # (dry) signal -- a clean tail rather than the drive grinding the reverb. The
+        # dry passes through untouched, so the reverb adds no latency; only mix > 0
+        # spends any CPU. This is the shared bus a future sung-voice mic would join.
+        sat = np.tanh(mix * drive_eff)
+        if reverb_mix > 0.0:
+            wet = reverb.process(sat, reverb_room, reverb_damping)
+            sat = sat * (1.0 - reverb_mix) + wet * reverb_mix
+
         n_ch = outdata.shape[1]
-        # mix is already a decorrelated stereo pair (its two columns are the left/right
-        # noise realisations). On a stereo device, emit them directly. Spatial mode is a
-        # hand-controlled point source, not a diffuse field, so it folds to mono and
-        # pans; mono/surround devices fold down and replicate.
+        # sat is a decorrelated stereo pair. On a stereo device, emit it directly.
+        # Spatial mode is a hand-controlled point source, not a diffuse field, so it
+        # folds to mono and pans; mono/surround devices fold down and replicate.
         if spatial_mode and n_ch >= 2:
-            mono = mix.mean(axis=1)
-            mix32 = np.tanh(mono * drive_eff).astype(np.float32)
+            mono = sat.mean(axis=1).astype(np.float32)
             gains = np.asarray(pan_gains(state.cur_position, n_ch, pan_floor),
                                dtype=np.float32)
-            outdata[:] = mix32[:, None] * gains
+            outdata[:] = mono[:, None] * gains
         elif n_ch == 2:
-            outdata[:] = np.tanh(mix * drive_eff).astype(np.float32)
+            outdata[:] = sat.astype(np.float32)
         else:
-            mono = mix.mean(axis=1)
-            mix32 = np.tanh(mono * drive_eff).astype(np.float32)
-            outdata[:] = mix32[:, None]
+            outdata[:] = sat.mean(axis=1).astype(np.float32)[:, None]
 
     return callback

@@ -171,6 +171,14 @@ STORM_SOFT_BODY = 0.25      # very soft -> up to +25% low-band body (rounded bre
 # decorrelated. Mono-safe, so a non-zero default is fine.
 STEREO_WIDTH = 0.6
 
+# Reverb (stereo Freeverb on the output bus, after the drive saturation). Adds a
+# decaying tail with no latency on the dry signal -- the dry passes through
+# untouched. Built as a shared bus so a future sung-voice mic can run through the
+# same tail. mix=0 bypasses it entirely (no CPU spent).
+REVERB_MIX = 0.25          # wet/dry blend: 0 = dry only (off), 1 = fully wet
+REVERB_ROOM = 0.7          # room size / decay length: 0 = small/tight, 1 = long hall
+REVERB_DAMPING = 0.5       # high-frequency damping in the tail: 0 = bright, 1 = dark
+
 # Pipe organ mode (toggle with 'o'): an additive harmonic stack (the way an organ
 # stacks pipe ranks) blended with pink noise resonating in the "tube", so it sounds
 # like wind howling through metal pipes (aeolian) rather than a clean electronic organ.
