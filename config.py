@@ -119,6 +119,23 @@ DMX_STAGES = [
 DMX_MIN_LEVEL = 80      # lowest level that still spins the fan (0..255)
 DMX_FULL_AT = 0.7       # sound level that maps to DMX_ON_LEVEL
 
+# DMX light: a Colorbeam 7 RGBW projector on the dimmer's DMX-out (same universe
+# as the fans), at DMX_LIGHT_CHANNEL. It glows a warm "ember" that breathes with
+# the breath -- brightness follows sound_level (smoothed: fast-ish swell, slow
+# ember-like fall) between a resting floor and a peak, so the projector stays warm
+# at rest and rises when the wind is played. The colour is fixed; only the level
+# breathes. Channels are R,G,B,W on consecutive addresses (Colorbeam DMX-MODE 3 =
+# 4 channels). In 8-channel mode (DMX-MODE 4) the fixture also gates on its master
+# at base+7, which we hold full -- harmless in 4-channel mode. Pick the colour with
+# `color_picker.py` (trackpad). On by default with --dmx; disable with --no-dmx-light.
+DMX_LIGHT_CHANNEL = 1                 # R address; G/B/W follow on +1/+2/+3
+DMX_LIGHT_COLOR = (255, 140, 0, 74)   # warm amber RGBW at full intensity
+DMX_LIGHT_FLOOR = 0.55                # resting brightness (fraction of colour), no breath
+DMX_LIGHT_PEAK = 0.75                 # brightness at full breath (level >= DMX_LIGHT_FULL_AT)
+DMX_LIGHT_FULL_AT = 0.7               # sound level that reaches DMX_LIGHT_PEAK
+DMX_LIGHT_RISE_S = 0.8                # swell time as the breath grows (follows the gesture)
+DMX_LIGHT_FALL_S = 3.0                # ember decay time as the breath eases (slow)
+
 # 3-band synth: fixed low/high band centers, mid band tracks theremin pitch.
 LOW_FC, LOW_Q = 110.0, 0.7
 HIGH_FC, HIGH_Q = 3200.0, 6.0

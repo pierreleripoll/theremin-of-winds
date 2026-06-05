@@ -54,13 +54,31 @@ def _packet(channels: bytearray) -> bytes:
 
 
 def dmx_loop(state: State, port: str, base_channel: int, on_level: int, stop, debug: bool,
-             proportional: bool = False, min_level: int = 0, stages=None):
+             proportional: bool = False, min_level: int = 0, stages=None, light=None):
     base_channel = max(1, min(512, base_channel))
     on_level = max(0, min(255, on_level))
     min_level = max(0, min(on_level, min_level))
     mode = "dim" if proportional else "switch"
     period = 1.0 / DMX_FRAME_HZ
     ramp_alpha = 1.0 - math.exp(-period / max(DMX_RAMP_S, 1e-3))
+
+    # Optional RGBW light (Colorbeam) on the same DMX universe: its brightness
+    # breathes with sound_level between a resting floor and a peak, smoothed with a
+    # fast-ish swell and a slow ember-like fall (asymmetric one-pole). Fixed colour;
+    # only the level moves. Held master (base+7) covers the fixture's 8-channel mode.
+    lt = None
+    if light:
+        lb = max(1, min(512, light["base"]))
+        lt = {
+            "chans": [lb + i for i in range(4)],   # R, G, B, W
+            "master": lb + 7,                       # 8-channel-mode master; harmless in 4-ch
+            "color": light["color"],
+            "floor": light["floor"], "peak": light["peak"],
+            "full_at": max(light["full_at"], 1e-6),
+            "rise": 1.0 - math.exp(-period / max(light["rise_s"], 1e-3)),
+            "fall": 1.0 - math.exp(-period / max(light["fall_s"], 1e-3)),
+            "bright": light["floor"],
+        }
 
     # One independent integrator per outlet. Built once so charge/engaged/cur
     # persist across serial reconnects.
@@ -77,6 +95,8 @@ def dmx_loop(state: State, port: str, base_channel: int, on_level: int, stop, de
         })
 
     desc = ", ".join(f"{s['label']}->ch{s['ch']}@{s['loud_at']}" for s in st)
+    if lt:
+        desc += f", light->ch{lt['chans'][0]}-{lt['chans'][3]} {int(lt['floor']*100)}-{int(lt['peak']*100)}%"
     print(f"[dmx] opening Enttec: {port} (mode={mode}, min={min_level}, on={on_level}; {desc})")
     frame = bytearray(512)  # channels 1..512 -> index 0..511
 
@@ -114,8 +134,19 @@ def dmx_loop(state: State, port: str, base_channel: int, on_level: int, stop, de
                                 target = on_level
                             stg["cur"] += (target - stg["cur"]) * ramp_alpha
                         frame[stg["ch"] - 1] = int(max(0, min(255, round(stg["cur"]))))
+                    if lt:
+                        # Breath -> brightness fraction. Resting on the floor when
+                        # played softly; rising toward peak as the wind grows. When
+                        # disabled (the 'd' toggle), target 0 so the light fades out.
+                        norm = max(0.0, min(1.0, level / lt["full_at"]))
+                        target = lt["floor"] + (lt["peak"] - lt["floor"]) * norm if enabled else 0.0
+                        lt["bright"] += (target - lt["bright"]) * (
+                            lt["rise"] if target > lt["bright"] else lt["fall"])
+                        for i, ch in enumerate(lt["chans"]):
+                            frame[ch - 1] = int(max(0, min(255, round(lt["color"][i] * lt["bright"]))))
+                        frame[lt["master"] - 1] = 255
                     if debug:
-                        print("[dmx] " + "  ".join(
+                        print(f"[dmx] lvl={level:.3f}  " + "  ".join(
                             f"{stg['label']} ch{stg['ch']}={frame[stg['ch'] - 1]:>3} "
                             f"c={stg['charge']:.2f}{'*' if stg['engaged'] else ' '}"
                             for stg in st))

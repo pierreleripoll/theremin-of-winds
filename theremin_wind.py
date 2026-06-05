@@ -27,7 +27,9 @@ import sounddevice as sd
 from audio import make_audio_callback
 from autoplay import autoplay_loop
 from config import (
-    BAUD, BLOCK, DMX_CHANNEL, DMX_MIN_LEVEL, DMX_ON_LEVEL, DMX_STAGES, SR, STREAM_BAUD,
+    BAUD, BLOCK, DMX_CHANNEL, DMX_LIGHT_CHANNEL, DMX_LIGHT_COLOR, DMX_LIGHT_FLOOR,
+    DMX_LIGHT_FULL_AT, DMX_LIGHT_PEAK, DMX_LIGHT_RISE_S, DMX_LIGHT_FALL_S,
+    DMX_MIN_LEVEL, DMX_ON_LEVEL, DMX_STAGES, SR, STREAM_BAUD,
 )
 from dmx import dmx_loop, find_dmx_port
 from midi import find_serial_port, list_serial_ports, serial_loop
@@ -89,6 +91,11 @@ def main():
                          "dim = fan speed tracks wind intensity (dimmer channel in gradation mode)")
     ap.add_argument("--dmx-min", type=int, default=DMX_MIN_LEVEL,
                     help=f"dim mode: lowest level that still spins the fan (default {DMX_MIN_LEVEL})")
+    ap.add_argument("--no-dmx-light", action="store_false", dest="dmx_light",
+                    help="don't drive the Colorbeam RGBW projector that breathes with the wind "
+                         f"(on by default with --dmx, at DMX channel {DMX_LIGHT_CHANNEL})")
+    ap.add_argument("--dmx-light-channel", type=int, default=DMX_LIGHT_CHANNEL,
+                    help=f"projector base address (R; G/B/W follow) (default {DMX_LIGHT_CHANNEL})")
     ap.add_argument("--dashboard", action="store_true",
                     help="push live readings to the kiosk dashboard API")
     ap.add_argument("--dashboard-url", default="http://localhost:8000/theremin-live",
@@ -211,11 +218,20 @@ def main():
         if dmx_port is not None:
             state.dmx_available = True
             state.dmx_on = True
+            light = None
+            if args.dmx_light:
+                light = {
+                    "base": args.dmx_light_channel,
+                    "color": DMX_LIGHT_COLOR,
+                    "floor": DMX_LIGHT_FLOOR, "peak": DMX_LIGHT_PEAK,
+                    "full_at": DMX_LIGHT_FULL_AT,
+                    "rise_s": DMX_LIGHT_RISE_S, "fall_s": DMX_LIGHT_FALL_S,
+                }
             dmx_thread = threading.Thread(
                 target=dmx_loop,
                 args=(state, dmx_port, args.dmx_channel, DMX_ON_LEVEL, dmx_stop, args.debug),
                 kwargs={"proportional": args.dmx_mode == "dim", "min_level": args.dmx_min,
-                        "stages": DMX_STAGES},
+                        "stages": DMX_STAGES, "light": light},
                 daemon=True,
             )
             dmx_thread.start()
